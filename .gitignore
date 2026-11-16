@@ -1,0 +1,9 @@
+.DS_Store
+node_modules/
+# Local tooling config with machine-specific paths
+.claude/
+# Large binaries kept on disk only: the reference zip and mood-board images
+*.zip
+SNAKE_SHIFT_REFERENCE_PACKAGE/references/
+# Other mood-board image folders: kept on disk, not tracked
+SNAKE_SHIFT_*/*.png

@@ -1,0 +1,77 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#050308">
+  <meta name="description" content="SNAKE//SHIFT: classic Snake. Every dot breaks time.">
+  <title>SNAKE//SHIFT</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' fill='%239aa97f'/%3E%3Cpath d='M2 10h8V4h2v8H2z' fill='%23232d1e'/%3E%3Cpath d='M13 2h1v1h-1z' fill='%23232d1e'/%3E%3C/svg%3E">
+</head>
+<body>
+  <main id="stage" aria-label="Game stage">
+    <canvas id="gl" aria-hidden="true"></canvas>
+    <canvas id="flat" aria-hidden="true"></canvas>
+    <div id="invert" aria-hidden="true"></div>
+  </main>
+
+  <header id="hud" hidden>
+    <div class="hud-plate">
+      <output id="score" aria-label="Score">000</output>
+      <span class="era"><b id="era-name">3310 GHOST</b><i id="era-year">1999</i></span>
+    </div>
+    <nav class="hud-buttons" aria-label="Game controls">
+      <button id="btn-pause" type="button" aria-label="Pause (P)" aria-pressed="false">II</button>
+      <button id="btn-mute" type="button" aria-label="Mute (M)" aria-pressed="false">&#9834;</button>
+      <button id="btn-settings" type="button" aria-label="Settings">&#9881;&#xFE0E;</button>
+    </nav>
+  </header>
+
+  <nav id="dpad" hidden aria-label="Direction buttons">
+    <button type="button" data-dir="up" aria-label="Up">&#9650;</button>
+    <button type="button" data-dir="left" aria-label="Left">&#9664;</button>
+    <button type="button" data-dir="right" aria-label="Right">&#9654;</button>
+    <button type="button" data-dir="down" aria-label="Down">&#9660;</button>
+  </nav>
+
+  <p id="hint" hidden>PRESS AN ARROW TO START</p>
+
+  <section id="title" class="panel" aria-labelledby="title-h">
+    <h1 id="title-h" class="logo" data-text="SNAKE//SHIFT">SNAKE<span>//</span>SHIFT</h1>
+    <p class="tagline">EAT THE DOT. BREAK TIME.</p>
+    <div class="warning" role="note">
+      <strong>&#9888; PHOTOSENSITIVITY WARNING</strong>
+      <p>This game uses rapid flashing, strobe bursts, full-screen colour inversion and violent scene cuts. If you or anyone watching has photosensitive epilepsy or is sensitive to flashing light, switch on <em>Reduced flash</em> before you play.</p>
+    </div>
+    <div class="switches">
+      <label class="switch"><input type="checkbox" data-pref="reducedFlash"><span class="knob"></span><span class="lbl">Reduced flash<small>no strobes, no inversions, gentle cuts</small></span></label>
+      <label class="switch"><input type="checkbox" data-pref="reducedMotion"><span class="knob"></span><span class="lbl">Reduced motion<small>slow scenery, no first-person view</small></span></label>
+    </div>
+    <button id="btn-play" class="big" type="button" disabled>[ PLAY ]</button>
+    <p id="loading" class="keys">LOADING TIMELINES&hellip;</p>
+    <p class="keys">ARROWS / WASD &middot; SWIPE &middot; P PAUSE &middot; M MUTE</p>
+  </section>
+
+  <section id="paused" class="panel" hidden aria-labelledby="paused-h">
+    <h2 id="paused-h">PAUSED</h2>
+    <div class="switches">
+      <label class="switch"><input type="checkbox" data-pref="reducedFlash"><span class="knob"></span><span class="lbl">Reduced flash<small>no strobes, no inversions, gentle cuts</small></span></label>
+      <label class="switch"><input type="checkbox" data-pref="reducedMotion"><span class="knob"></span><span class="lbl">Reduced motion<small>slow scenery, no first-person view</small></span></label>
+      <label class="switch"><input type="checkbox" data-pref="dpad"><span class="knob"></span><span class="lbl">Touch buttons<small>on-screen arrows instead of swipes</small></span></label>
+    </div>
+    <button id="btn-resume" class="big" type="button">[ RESUME ]</button>
+    <p class="keys">P / ESC TO RESUME</p>
+  </section>
+
+  <section id="over" class="panel" hidden aria-labelledby="over-h">
+    <h2 id="over-h" class="collapsed">REALITY COLLAPSED</h2>
+    <p class="final">SCORE <b id="over-score">0</b> <span class="sep">/</span> BEST <b id="over-best">0</b></p>
+    <p id="over-new" class="new" hidden>NEW BEST</p>
+    <button id="btn-again" class="big" type="button">[ AGAIN? ]</button>
+    <p class="keys">ENTER / SPACE</p>
+  </section>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>

@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SNAKE//SHIFT fx-pass harness</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #07020f; overflow: hidden; }
+  #gl { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+  #out {
+    position: fixed; left: 8px; top: 8px; z-index: 2; max-width: calc(100vw - 16px); max-height: 60vh; overflow: auto;
+    font: 11px/1.35 ui-monospace, Menlo, monospace; color: #f5e9ff; white-space: pre-wrap;
+    background: rgba(16, 4, 30, 0.8); border: 1px solid #ff3fb4; padding: 6px; border-radius: 6px;
+  }
+  #out:empty { display: none; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="out">loading…</div>
+<script type="module" src="./fx-pass.js"></script>
+</body>
+</html>

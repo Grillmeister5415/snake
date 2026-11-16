@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>core harness</title>
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: #000; }
+    canvas { position: fixed; inset: 0; width: 100%; height: 100%; }
+    #invert { position: fixed; inset: 0; background: #fff; mix-blend-mode: difference; pointer-events: none; display: none; }
+  </style>
+</head>
+<body>
+  <canvas id="flat"></canvas>
+  <div id="invert"></div>
+  <script type="module" src="core.js"></script>
+</body>
+</html>

@@ -1,0 +1,127 @@
+// Builds the `fx` object of plan 15.3 once per frame. Pure: no DOM.
+// The switches are applied here, so renderers rarely need to branch.
+
+import { FX } from './config.js';
+
+const clamp01 = (v) => Math.max(0, Math.min(1, v));
+
+/** Fallback beat clock (frame clock) used when beat.js is missing. Same shape as createBeat(). */
+export function createFallbackBeat({ bpm = 132 } = {}) {
+  let source = () => (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
+  let t0 = 0;
+  let running = false;
+  const period = 60 / bpm;
+  const beat = {
+    bpm,
+    get running() { return running; },
+    setTimeSource(fn) { if (typeof fn === 'function') source = fn; },
+    start() { if (!running) { running = true; t0 = source(); } },
+    stop() { running = false; },
+    index() { return running ? Math.floor((source() - t0) / period) : 0; },
+    phase() { return running ? ((source() - t0) / period) % 1 : 0; },
+    pulse() { return running ? Math.exp(-beat.phase() * 6) : 0; },
+  };
+  return beat;
+}
+
+/**
+ * createFx() -> { frame({ now, director, beat, prefs }) -> fx }
+ *   director: director.get() result; beat: createBeat()-like object; prefs: { reducedFlash, reducedMotion }
+ * Extra fields beyond 15.3 (additive): strobe, invert, glitch, split, scene, prev, view, timeline, kind.
+ */
+export function createFx() {
+  let lastNow = null;
+  let time = 0;
+
+  function frame({ now, director: d, beat, prefs }) {
+    const rf = !!prefs.reducedFlash;
+    const rm = !!prefs.reducedMotion;
+    const dt = lastNow === null ? 0 : Math.max(0, Math.min(100, now - lastNow));
+    lastNow = now;
+    time += (dt / 1000) * (rm ? FX.reducedMotionTime : 1);
+
+    const running = !!(beat && beat.running);
+    let pulse = 0, beatIndex = 0;
+    if (running) {
+      try {
+        if (typeof beat.sample === 'function') {
+          const s = beat.sample(); // one clock read
+          pulse = clamp01(s.pulse);
+          beatIndex = s.index | 0;
+        } else {
+          pulse = clamp01(beat.pulse());
+          beatIndex = beat.index() | 0;
+        }
+      } catch { pulse = 0; }
+    }
+    if (rf) pulse = Math.min(pulse * FX.reducedFlashBeat, FX.reducedFlashBeat);
+
+    const biteAge = d && Number.isFinite(d.biteAt) ? Math.max(0, now - d.biteAt) : Infinity;
+    const cutAge = d ? Math.max(0, now - d.cutAt) : Infinity;
+    const chaos = d ? d.chaos : 0;
+    const punch = rf || !Number.isFinite(biteAge) ? 0 : Math.pow(clamp01(1 - biteAge / FX.punchMs), 2);
+
+    let strobe = 0;
+    if (!rf && d && d.strobe) {
+      const s = d.strobe;
+      const t = now - s.at;
+      if (t >= 0 && t < s.dur) {
+        const half = s.dur / (s.count * 2);
+        strobe = Math.floor(t / half) % 2 === 0 ? 1 : 0;
+      }
+    }
+    const invert = !rf && !!d && now < d.invertUntil;
+    const cutKick = clamp01(1 - cutAge / 350);
+    const glitch = rf ? 0 : clamp01(chaos * (0.22 + 0.78 * Math.max(punch, cutKick, pulse * 0.45)));
+    const split = rf ? 0 : chaos * 7 * (0.3 + 0.7 * Math.max(punch, pulse));
+
+    return {
+      now,
+      time,
+      beat: pulse,
+      beatIndex,
+      chaos,
+      punch,
+      variant: d ? d.variant : 0,
+      bite: d ? d.bite : null,
+      biteAge,
+      cutAge,
+      reducedFlash: rf,
+      reducedMotion: rm,
+      // additive extras
+      strobe, invert, glitch, split,
+      scene: d ? d.showing : null,
+      prev: d ? (d.prevTimeline ?? null) : null, // previous timeline or room id (flat-a request)
+      view: d ? d.view : 'board',
+      timeline: d ? d.timeline : null,
+      kind: d ? d.kind : '2d',
+    };
+  }
+
+  return { frame, reset() { lastNow = null; } };
+}
+
+/**
+ * Quality scaling: feed real frame intervals; when the smoothed interval stays above `slowMs`
+ * for `holdMs`, step down one level (lower canvas resolution). Throttled or hidden-tab gaps
+ * (over `ignoreMs`) are ignored. Returns true from sample() when the level changed.
+ */
+export function createQuality({ levels = [1, 0.75, 0.5], slowMs = 28, holdMs = 2000, ignoreMs = 250 } = {}) {
+  let level = 0, ema = 16.7, slowFor = 0, cooldown = 0;
+  return {
+    get level() { return level; },
+    get scale() { return levels[level]; },
+    sample(dt) {
+      if (!(dt > 0) || dt > ignoreMs) { slowFor = 0; return false; }
+      ema += (dt - ema) * 0.1;
+      if (cooldown > 0) { cooldown -= dt; return false; }
+      slowFor = ema > slowMs ? slowFor + dt : 0;
+      if (slowFor < holdMs || level >= levels.length - 1) return false;
+      level++;
+      slowFor = 0;
+      ema = 16.7;
+      cooldown = 1000; // let the new size settle before judging again
+      return true;
+    },
+  };
+}

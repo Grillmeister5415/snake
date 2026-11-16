@@ -1,0 +1,220 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SNAKE//SHIFT audio harness</title>
+<style>
+  :root { --bg: #08060f; --fg: #e8e4ff; --dim: #8a83a8; --acc: #ff2bd6; --ok: #3dffb0; --bad: #ff4b4b; --panel: #15112a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.4 ui-monospace, Menlo, monospace; padding: 16px; }
+  h1 { font-size: 18px; margin: 0 0 4px; letter-spacing: .08em; }
+  p.sub { margin: 0 0 16px; color: var(--dim); }
+  .grid { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 16px; }
+  @media (max-width: 720px) { .grid { grid-template-columns: 1fr; } }
+  section { background: var(--panel); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+  section h2 { font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: .12em; margin: 0 0 8px; }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  button { background: #241d45; color: var(--fg); border: 1px solid #3a3166; border-radius: 6px; padding: 7px 10px; font: inherit; cursor: pointer; }
+  button:hover { border-color: var(--acc); }
+  button.on { background: var(--acc); color: #000; border-color: var(--acc); }
+  input[type=range] { width: 220px; }
+  #beatBox { display: grid; place-items: center; height: 200px; }
+  #pulse { width: 120px; height: 120px; border-radius: 12px; background: var(--acc); }
+  #dots { display: flex; gap: 8px; margin-top: 10px; justify-content: center; }
+  #dots span { width: 14px; height: 14px; border-radius: 50%; background: #2b2450; }
+  #dots span.lit { background: var(--ok); }
+  pre { margin: 0; white-space: pre-wrap; font-size: 12px; }
+  #log { max-height: 180px; overflow: auto; color: var(--dim); }
+  #log .bad { color: var(--bad); } #log .ok { color: var(--ok); }
+</style>
+</head>
+<body>
+<h1>SNAKE//SHIFT — audio harness</h1>
+<p class="sub">Unlock first (needs a click). Space = bite. Nothing here touches game state.</p>
+<div class="grid">
+  <div>
+    <section>
+      <h2>Engine</h2>
+      <div class="row">
+        <button id="unlock">UNLOCK</button>
+        <button id="start">START RHYTHM</button>
+        <button id="stop">STOP</button>
+        <button id="mute">MUTE</button>
+        <button id="demo">DEMO RUN</button>
+        <button id="peak">PEAK TEST (offline)</button>
+      </div>
+    </section>
+    <section>
+      <h2>Timeline</h2>
+      <div class="row" id="timelines"></div>
+    </section>
+    <section>
+      <h2>Events</h2>
+      <div class="row">
+        <button id="bite">BITE</button>
+        <button id="cut">CUT</button>
+        <button id="swing">CUT (swing)</button>
+        <button id="die">DIE</button>
+        <button id="reset">SCORE = 0</button>
+        <span id="score">score 0</span>
+      </div>
+    </section>
+    <section>
+      <h2>Chaos &amp; prefs</h2>
+      <div class="row">
+        <label>chaos <input id="chaos" type="range" min="0" max="1" step="0.01" value="0"></label>
+        <span id="chaosVal">0.00</span>
+        <label><input id="rf" type="checkbox"> reduced flash</label>
+        <label><input id="rm" type="checkbox"> reduced motion</label>
+      </div>
+    </section>
+    <section>
+      <h2>Log</h2>
+      <pre id="log"></pre>
+    </section>
+  </div>
+  <div>
+    <section>
+      <h2>Beat (beat.pulse())</h2>
+      <div id="beatBox"><div id="pulse"></div></div>
+      <div id="dots"><span></span><span></span><span></span><span></span></div>
+      <pre id="beatInfo"></pre>
+    </section>
+    <section>
+      <h2>debug()</h2>
+      <pre id="status"></pre>
+    </section>
+  </div>
+</div>
+<script type="module">
+import { createAudio, TIMELINE_IDS } from '../src/audio.js';
+
+const prefs = { reducedFlash: false, reducedMotion: false };
+const audio = createAudio(() => prefs);
+const $ = (id) => document.getElementById(id);
+let score = 0;
+let current = 'lcd';
+const errors = [];
+window.__audio = audio;
+window.__harness = { errors, prefs };
+
+function log(msg, cls = '') {
+  const line = document.createElement('div');
+  if (cls) line.className = cls;
+  line.textContent = `${(performance.now() / 1000).toFixed(2)}  ${msg}`;
+  $('log').prepend(line);
+}
+addEventListener('error', (e) => { errors.push(String(e.message)); log('ERROR ' + e.message, 'bad'); });
+addEventListener('unhandledrejection', (e) => { errors.push(String(e.reason)); log('REJECTION ' + e.reason, 'bad'); });
+
+for (const id of TIMELINE_IDS) {
+  const b = document.createElement('button');
+  b.textContent = id;
+  b.dataset.id = id;
+  b.onclick = () => setTimeline(id);
+  $('timelines').append(b);
+}
+function setTimeline(id) {
+  current = id;
+  audio.setTimeline(id);
+  for (const b of $('timelines').children) b.classList.toggle('on', b.dataset.id === id);
+}
+setTimeline('lcd');
+
+function bite() {
+  score++;
+  $('score').textContent = `score ${score}`;
+  if (!audio.beat.running) audio.start(); // the game starts the rhythm on the first bite
+  audio.eat(score);
+}
+
+$('unlock').onclick = async () => log('unlock → ' + (await audio.unlock()) + ' (' + audio.debug().state + ')', 'ok');
+$('start').onclick = () => { audio.start(); log('start'); };
+$('stop').onclick = () => { audio.stop(); log('stop'); };
+$('mute').onclick = () => {
+  audio.setMuted(!audio.muted);
+  $('mute').classList.toggle('on', audio.muted);
+  log('muted ' + audio.muted);
+};
+$('bite').onclick = bite;
+$('cut').onclick = () => { audio.cut({ swing: false }); log('cut'); };
+$('swing').onclick = () => { audio.cut({ swing: true }); log('cut swing'); };
+$('die').onclick = () => { audio.die(); log('die'); };
+$('reset').onclick = () => { score = 0; $('score').textContent = 'score 0'; };
+$('chaos').oninput = (e) => { audio.setChaos(+e.target.value); $('chaosVal').textContent = (+e.target.value).toFixed(2); };
+$('rf').onchange = (e) => { prefs.reducedFlash = e.target.checked; };
+$('rm').onchange = (e) => { prefs.reducedMotion = e.target.checked; };
+addEventListener('keydown', (e) => { if (e.code === 'Space') { e.preventDefault(); bite(); } });
+
+// Demo: a bite every 2 beats, chaos from score, a new timeline + cut on each bite.
+let demo = null;
+$('demo').onclick = () => {
+  if (demo) { clearInterval(demo); demo = null; $('demo').classList.remove('on'); return; }
+  $('demo').classList.add('on');
+  let lastBeat = -1;
+  demo = setInterval(() => {
+    const i = audio.beat.running ? audio.beat.index() : -2;
+    if (i === lastBeat || (i >= 0 && i % 2)) return;
+    lastBeat = i;
+    const ids = TIMELINE_IDS.filter((x) => x !== current && x !== 'lcd');
+    setTimeline(ids[Math.floor(Math.random() * ids.length)]);
+    audio.cut({ swing: Math.random() < 0.4 });
+    bite();
+    const c = Math.min(1, score / 25);
+    audio.setChaos(c);
+    $('chaos').value = c;
+    $('chaosVal').textContent = c.toFixed(2);
+  }, 20);
+};
+
+// Offline worst case: every bite voice + heavy cut + death + a max-chaos bar per kit, at once.
+$('peak').onclick = async () => {
+  const sr = 44100;
+  const off = new OfflineAudioContext(2, sr * 3, sr);
+  const a = createAudio(() => ({}), { context: off });
+  await a.unlock();
+  a.setChaos(1);
+  for (const id of TIMELINE_IDS) { a.setTimeline(id); a.eat(7); }
+  a.cut({ swing: true });
+  for (const id of ['bunker', 'kombat', 'disco', 'timewarp']) {
+    a.setTimeline(id);
+    for (let s = 0; s < 16; s++) a._step(s, 0.2 + s * (a.beat.period / 4));
+  }
+  a.die();
+  const buf = await off.startRendering();
+  let peak = 0, sum = 0, n = 0;
+  for (let ch = 0; ch < buf.numberOfChannels; ch++) {
+    const d = buf.getChannelData(ch);
+    for (let i = 0; i < d.length; i++) { const v = Math.abs(d[i]); if (v > peak) peak = v; sum += v * v; n++; }
+  }
+  const res = { peak: +peak.toFixed(4), rms: +Math.sqrt(sum / n).toFixed(4), voices: a.debug().voices, errors: a.debug().errors };
+  window.__peak = res;
+  log('peak test ' + JSON.stringify(res), peak < 1 ? 'ok' : 'bad');
+};
+
+// Beat indicator and BPM measurement.
+let lastIndex = -1, lastChange = 0;
+const intervals = [];
+function frame() {
+  const s = audio.beat.sample();
+  const p = s.pulse;
+  $('pulse').style.transform = `scale(${0.4 + 0.6 * p})`;
+  $('pulse').style.opacity = String(0.25 + 0.75 * p);
+  [...$('dots').children].forEach((d, i) => d.classList.toggle('lit', audio.beat.running && s.index % 4 === i));
+  if (audio.beat.running && s.index !== lastIndex) {
+    const now = performance.now();
+    if (lastIndex >= 0 && s.index === lastIndex + 1) { intervals.push(now - lastChange); if (intervals.length > 16) intervals.shift(); }
+    lastIndex = s.index; lastChange = now;
+  }
+  if (!audio.beat.running) { lastIndex = -1; intervals.length = 0; }
+  const avg = intervals.length ? intervals.reduce((x, y) => x + y, 0) / intervals.length : 0;
+  window.__harness.measuredBpm = avg ? 60000 / avg : 0;
+  $('beatInfo').textContent = `index ${s.index}  phase ${s.phase.toFixed(2)}  pulse ${p.toFixed(2)}\nmeasured ${avg ? (60000 / avg).toFixed(1) : '—'} BPM (target ${audio.beat.bpm})`;
+  $('status').textContent = JSON.stringify(audio.debug(), null, 1);
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>

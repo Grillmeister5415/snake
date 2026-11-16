@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>SNAKE//SHIFT gl harness</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #07020f; overflow: hidden; touch-action: none; }
+  #gl { position: fixed; inset: 0; width: 100vw; height: 100vh; display: block; }
+  #ui {
+    position: fixed; left: 8px; top: 8px; z-index: 2; max-width: calc(100vw - 16px);
+    font: 12px/1.35 ui-monospace, Menlo, monospace; color: #f5e9ff;
+    background: rgba(16, 4, 30, 0.82); border: 1px solid #ff3fb4; padding: 8px; border-radius: 6px;
+  }
+  #ui button { font: inherit; color: #07020f; background: #2ef6ff; border: 0; border-radius: 3px; padding: 3px 7px; margin: 0 4px 4px 0; cursor: pointer; }
+  #ui label { margin-right: 8px; white-space: nowrap; }
+  #ui input[type=range] { width: 90px; vertical-align: middle; }
+  #out { white-space: pre-wrap; margin-top: 4px; max-height: 40vh; overflow: auto; }
+  #ui.min > :not(#toggle) { display: none; }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="ui">
+  <button id="toggle">ui</button>
+  <button id="view">view: board (V)</button>
+  <button id="bite">bite (B)</button>
+  <button id="pause">pause (Space)</button>
+  <button id="check">check cells (C)</button>
+  <button id="nullcheck">null path</button><br>
+  <label>chaos <input id="chaos" type="range" min="0" max="1" step="0.05" value="0.2"></label>
+  <label><input id="rf" type="checkbox"> reduced flash</label>
+  <label><input id="rm" type="checkbox"> reduced motion</label>
+  <div id="out">loading…</div>
+</div>
+<script type="module" src="./gl.js"></script>
+</body>
+</html>
