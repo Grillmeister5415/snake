@@ -1,64 +1,58 @@
 // Autopilot: picks a direction from a snapshot alone and steers through
-// queueTurn, like a player. Used by tests and by ?auto demo runs.
+// queueTurn, like a player. Works in all three spaces (box, lane, cube) using
+// the neighbours of space.js. Used by tests and by ?auto demo runs.
 
-import { DIRS, OPPOSITE } from './sim.js';
+import { OPPOSITE, DIR_ORDER, stepIn, fromBoard, spaceGraph, bfs, sameCell } from './space.js';
 
-const ORDER = ['up', 'right', 'down', 'left'];
-
-function flood(blocked, cols, rows, sx, sy, target) {
-  // Returns { area, dist } where dist is BFS steps to target (or Infinity).
-  const seen = new Uint8Array(cols * rows);
-  const qx = new Int16Array(cols * rows);
-  const qy = new Int16Array(cols * rows);
-  const qd = new Int16Array(cols * rows);
-  let h = 0, t = 0, area = 0, dist = Infinity;
-  seen[sy * cols + sx] = 1;
-  qx[t] = sx; qy[t] = sy; qd[t] = 0; t++;
-  while (h < t) {
-    const x = qx[h], y = qy[h], d = qd[h]; h++;
-    area++;
-    if (target && dist === Infinity && x === target.x && y === target.y) dist = d;
-    for (const k of ORDER) {
-      const nx = x + DIRS[k].x, ny = y + DIRS[k].y;
-      if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
-      const i = ny * cols + nx;
-      if (seen[i] || blocked[i]) continue;
-      seen[i] = 1;
-      qx[t] = nx; qy[t] = ny; qd[t] = d + 1; t++;
-    }
-  }
-  return { area, dist };
-}
-
-/** Choose a direction for the next tick. Returns one of 'up'|'down'|'left'|'right'. */
+/** Choose a board-local direction for the next tick. Returns one of 'up'|'down'|'left'|'right'. */
 export function chooseDir(snap) {
-  const { cols, rows, snake, dir, food } = snap;
-  const head = snake[0];
-  const n = snake.length;
+  const space = snap.space || { kind: 'box' };
+  const box = space.kind === 'box' || !snap.body;
+  // Every hittable cell, head first, in space coordinates. In a box that is the visible snake.
+  const body = box ? snap.snake : snap.body;
+  const head = body[0];
+  const dir = snap.dir;
+  const n = body.length;
+  // Off-board cells may hide the true tail; then no cell is assumed to be vacated.
+  const tailKnown = n === (snap.length ?? n);
+  const targets = [];
+  if (box ? snap.food : snap.foodAt) targets.push(box ? snap.food : snap.foodAt);
+  if (snap.mushroom) targets.push(fromBoard(space, snap.mushroom.x, snap.mushroom.y));
+  const g = spaceGraph(space);
   let best = null;
 
-  for (const d of ORDER) {
+  for (const d of DIR_ORDER) {
     if (d === OPPOSITE[dir]) continue;
-    const nx = head.x + DIRS[d].x, ny = head.y + DIRS[d].y;
-    if (nx < 0 || ny < 0 || nx >= cols || ny >= rows) continue;
-    const eats = !!food && food.x === nx && food.y === ny;
-    // Body after the move: head..(tail kept if eating).
-    const keep = eats ? n : n - 1;
+    const r = stepIn(space, head, d);
+    if (!r) continue;
+    const nc = r.cell;
+    const eats = targets.some((t) => sameCell(t, nc));
+    const keep = eats || !tailKnown ? n : n - 1;
+    const blocked = new Uint8Array(g.size);
     let hit = false;
-    const blocked = new Uint8Array(cols * rows);
     for (let i = 0; i < keep; i++) {
-      const c = snake[i];
-      if (c.x === nx && c.y === ny) hit = true;
-      blocked[c.y * cols + c.x] = 1;
+      const c = body[i];
+      if (sameCell(c, nc)) hit = true;
+      const k = g.index(c);
+      if (k >= 0) blocked[k] = 1;
     }
     if (hit) continue;
-    const newTail = snake[keep - 1];
+    const newTail = body[keep - 1];
+    const tailIdx = g.index(newTail);
     // The new tail will move away, so it counts as reachable space.
-    blocked[newTail.y * cols + newTail.x] = 0;
-    const { area, dist } = flood(blocked, cols, rows, nx, ny, food);
-    const tailCheck = flood(blocked, cols, rows, nx, ny, newTail);
-    const safe = tailCheck.dist !== Infinity || area > n + 2;
-    const score = (safe ? 1e6 : 0) + (safe ? -Math.min(dist, 999) * 10 : area * 10) + (d === dir ? 1 : 0) + (eats ? 5 : 0);
+    if (tailKnown && tailIdx >= 0) blocked[tailIdx] = 0;
+    const dist = bfs(g, blocked, g.index(nc));
+    let area = 0;
+    for (let i = 0; i < dist.length; i++) if (dist[i] >= 0) area++;
+    let foodDist = Infinity;
+    for (const t of targets) {
+      const ti = g.index(t);
+      // Outside the search window (far along the lane): head that way by plain distance.
+      const td = ti >= 0 ? (dist[ti] >= 0 ? dist[ti] : Infinity) : 200 + Math.abs(t.x - nc.x) + Math.abs(t.y - nc.y);
+      if (td < foodDist) foodDist = td;
+    }
+    const safe = (tailKnown && tailIdx >= 0 && dist[tailIdx] >= 0) || area > n + 2;
+    const score = (safe ? 1e6 : 0) + (safe ? -Math.min(foodDist, 999) * 10 : area * 10) + (d === dir ? 1 : 0) + (eats ? 5 : 0);
     if (!best || score > best.score) best = { d, score };
   }
   return best ? best.d : dir;

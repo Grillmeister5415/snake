@@ -1,22 +1,30 @@
-# audio stream — notes
+# audio stream — notes (wave 1, LEVELS_PLAN 7)
 
 ## Done
-- `src/beat.js`: `createBeat({ bpm = 132 })` per 15.3, plus extras `period`, `now()`, `position(t?)`, `timeAt(beat)`, `sample()` → `{ index, phase, pulse }` from one clock read (use this for `fx`). Pulse = `exp(-5.5·phase)`. Source switch rebases (no jump); small backward jitter held, big rewinds rebased; broken source falls back to the frame clock.
-- `src/audio.js`: `createAudio(getPrefs)` per 15.3, plus `muted` getter, `debug()`, `TIMELINE_IDS`, `biteMidi()`. Web Audio only. Bite note walks up each timeline's scale (2 octaves, then wraps). Eleven bite voices, nine rhythm kits (`lcd` silent, `wrong` mixes kits per bar and voices per bite). Cut = band-passed noise sweep + sub drop; `swing: true` adds drive, a crushed saw dive and a deeper duck. Death = two falling saws, noise crash, sub. Rhythm: 16th steps scheduled 120 ms ahead from the beat clock; layers by chaos: kick → offbeat hat 0.12 → bass 0.28 → snare 0.45 → 16th hats 0.62 → era extras 0.75 → rolls and random stabs 0.9 (wild only). Master: compressor (−10 dB, 20:1) → soft-clip ceiling 0.97.
-- `tests/beat.test.js`: 12 tests, all pass (`node --test tests/beat.test.js`), incl. every audio method without Web Audio.
-- `dev/audio.html` on `ss-audio`: every control exercised, zero console errors. Measured 132.0 BPM; clock = audio after unlock; mute → master gain 0 and no new voices; all 10 voiced timelines schedule rhythm, `lcd` schedules none; offline worst-case stack peaks at 0.58 (no clipping). Not listened to.
+- `src/beat.js`: `beat.setBpm(bpm)` keeps index and phase continuous (no tempo map: ask about now/future). `bpm`/`period` are getters. Invalid values ignored, clamped 20..400.
+- `src/audio.js`: one continuous track. Stage `min(10, floor(score/5))` → tempo `112 + 4·stage` and layers kick, sub → +hat → +bass → +snare → +16th hats → +lead → +perc2 → +fills (every 4th bar) → +pump/open filters → +rolls/stabs → +wild. Kit = universe; the bar position carries across shifts (queued old-kit steps are cancelled, the new kit enters on the next grid step). Hunger riser (starts after 1 s, full at 6 s: noise swell, master low-pass to 3.2 kHz, tighter hats), released by the bite. Drop: a sixteenth of silence then sub + crash; from stage 8 a chopped stutter (0.75 / 0.5 / 0.375 sixteenth, halved when bites come faster than a bar). Tape stop → muffled (420 Hz, −8 dB) wait → snap back. Last life: heartbeat every half bar (not muffled) + −12 ct detune. Original rising maj9 life figure. `lcd`: clicks only at every stage, silent drop. `abyss`: half-time, soft, capped at stage-4 layers, no crash. New kits and bite voices: lane, hangar, mushroom, castle (12-step music box over 4/4), abyss. Music level +6 dB stage 0→10.
+- Pure, exported and tested: `stageOf stageBpm musicGain musicPlan hungerAt riserPlan dropPlan impactPlan pumpDepth filterScale lookPlan lifeFigure stepHits universeId`. `tests/music.test.js` (32) includes a mock AudioContext that checks what the engine schedules; `node --test tests/beat.test.js tests/music.test.js` → 50/50.
+- `dev/audio.html`: score slider, bite (new path), held bite, 16-universe picker, look 2d/3d/pov, legacy path toggle, life buttons, schedule check, offline peak render, BPM measure. All controls run, zero console errors. Schedule check 99 cases (9 universes × 11 stages) all right. Busiest render (stage 10, 4 kits stacked, last life, full riser, pov drone, heavy drop, all bite voices) peaks 0.717, 0% samples > 0.8. Measured 152.0 BPM at stage 10. Not listened to.
+
+## Interface (all safe before unlock, muted, without Web Audio)
+Kept: `unlock setMuted setTimeline setChaos eat cut die start stop beat muted debug`. `eat(score)` also sets the stage, so the current shell already gets tempo/layers. `setChaos` no longer sets layers.
+New: `setScore(n)`, `shift({ from, to, look, swing })`, `setLook(look)`, `setLives(n)`, `lifeLost()`, `respawned()`, `lifeGained()`, `beat.setBpm(bpm)`. Exports `TIMELINE_IDS` (16), `NEW_IDS`.
+
+## Exact calls for the shell (wave 2), in order
+1. PLAY click: `audio.unlock()` (user gesture), `audio.setMuted(prefs.muted)`.
+2. Run reset: `setScore(0)`, `setLives(snap.lives)`. First direction key (waiting 'start'): `audio.start()` — the run opens on lcd clicks.
+3. Food tick (`ate`, then maybe `shift`): after the sim step, in this order:
+   `setScore(ate.score)` → if `ate.lifeGained`: `setLives(snap.lives)`, `lifeGained()` →
+   `shift({ from, to, look, swing })` with the director's new look (held bite: `from === to`, the flipped look) → `eat(ate.score)`.
+   Total Reset to lcd is the same call (its drop is silent by design). No more `cut()`/`setTimeline()`.
+4. Look change without a bite (12 s first-person fallback): `setLook('3d')`.
+5. `lifeLost`: `setLives(e.lives)`, `lifeLost()`. Do NOT call `stop()` for the respawn wait.
+6. First direction key while waiting 'respawn': `respawned()` (same moment the sim resumes).
+7. `died`: `setLives(0)`, `die()` (stops beat and rhythm).
+8. User pause: `stop()`, resume: `start()` as today (restart begins at beat 0).
+9. `fx.beat`/`fx.beatIndex` from `audio.beat.sample()`; the director caps the pulse at 15% in lcd/abyss.
 
 ## Defaults chosen
-- `start()` starts the beat (if idle) and the rhythm; `stop()` and `die()` stop both and fade queued notes. Restart begins at beat 0.
-- Unknown timeline ids map to `arcade`; a `-pov` suffix is stripped (`court-pov` → `court`).
-- `reducedFlash` or `reducedMotion` → rhythm chaos ×0.6, no wild fills, `swing` cut plays as a normal cut, `wrong` bites single-voiced.
-- Initial mute comes from `getPrefs().muted` if present; `setMuted` wins after that.
-- When muted, nothing is synthesised (master gain also ramps to 0 in 30 ms).
-- Chord loop A–A–F–G under bass/extras; root A2.
-
-## Requests for core / integrate
-- Call `audio.unlock()` inside the PLAY click handler (it creates the context; must be a user gesture). It returns a Promise that never rejects.
-- Call `audio.start()` on the first bite of each run, `audio.stop()` on reset/pause if wanted; `die()` already stops.
-- Build `fx.beat` / `fx.beatIndex` from `audio.beat.sample()` (scale `pulse` to ≤15% under reduced flash). Do not call `audio.beat.setTimeSource()`; it is wired to the latency-corrected audio clock after unlock and the frame clock before.
-- Order on a bite: `setChaos(chaos)`, `setTimeline(newId)`, `cut({ swing })`, `eat(score)` — the bite voice uses the new timeline.
-- `getPrefs()` should return `{ reducedFlash, reducedMotion, muted }`.
+- Riser starts after 1 s without a bite (bites 1–2 s apart stay clean). Reduced flash/motion: no rolls/stabs/wild, no heavy drop.
+- Unknown ids → arcade; `-pov`/`-3d`/`-2d` suffixes stripped. `wrong` mixes all kits except abyss.
+- Arriving in 3d/pov whooshes on every shift (also held flips); pov adds a 55 Hz drone into the music low-pass.

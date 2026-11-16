@@ -23,6 +23,7 @@ uniform vec3 uEye;       // camera position
 uniform vec2 uBoard;     // board half extents (cols/2, rows/2)
 uniform float uPix;      // approx. angular size of a pixel, for derivative fallback
 uniform vec3 uFog;       // horizon haze colour (F.fog), used for distance fog
+uniform vec4 uLaneScroll; // lane space only (else 0): x origin row (absolute, smooth), y x mod 256, z 1 in lane space, w tick fraction
 #define uTime uFx.x
 #define uBeat uFx.y
 #define uPunch uFx.z
@@ -103,6 +104,7 @@ export function floorFS(deriv, room) {
   return header(deriv) + PRELUDE + room.sky + room.floor + `
 uniform vec3 uPanel, uGrid, uFrame;
 uniform vec4 uBoardStyle;   // x grid half-width (cells), y frame band width, z grid glow, w frame outer glow
+uniform vec4 uBoardMode;    // x 1 = open strip (F.board.open), y grid row offset (lane scroll), z 1 = no board (F.custom)
 varying vec3 vWorld;
 void main() {
   vec3 toP = vWorld - uEye;
@@ -112,13 +114,16 @@ void main() {
   gSinElev = abs(V.y);
   vec2 p = vWorld.xz;
   vec2 dd = abs(p) - uBoard;
+  if (uBoardMode.x > 0.5) dd.y = -1e4;     // open strip: runs to the horizon, side edges only
   float sd = length(max(dd, 0.0)) + min(max(dd.x, dd.y), 0.0);
+  if (uBoardMode.z > 0.5) sd = 1e4;        // custom board: the room draws it, the floor is all room
   vec2 w = aaWidth(p);
   float fog = smoothstep(70.0, 1500.0, dist);
   vec3 col;
   float alpha = 1.0;
   if (sd < 0.0) {
     vec2 q = p + uBoard;
+    q.y += uBoardMode.y;
     float line = gridAA(q, uBoardStyle.x, w);
     vec2 g = abs(fract(q + 0.5) - 0.5);
     vec2 e = exp(-g * 16.0);

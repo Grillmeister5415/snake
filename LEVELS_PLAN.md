@@ -349,7 +349,14 @@ Room streams test with `createRoomRenderer(canvas, { roomIds: ['<id>'] })`, so t
 | `castle-room` | `src/render/gl/rooms/castle.js`, `src/render/gl/cube.js`, and the engine files for additive fixes only |
 | `audit` | the seven existing timelines and the four existing rooms: make every one safe with `breaks`, off-board bodies and respawn, and give each a `life()` icon |
 
-`shell` and `overlay` agree on one call: `flat.render({ snap, fx, d, timelines, glActive, persp, touch, padSide })`, unchanged from today; everything new that `flat.js` needs is in `snap` and `fx`.
+| `lane-2d` | `src/render/timelines/lane.js` |
+| `castle-2d` | `src/render/timelines/castle.js` |
+
+Wave 1 result: `rules`, `engine-ext`, `audio`, `hangar`, `abyss` and `mushroom` are done; 119 rules and music tests pass. The `flat-spaces` session was stopped with nothing saved, so the two 2D looks are rebuilt here as two single-file streams. Read `snake-shift/notes/rules.md`, `notes/engine-ext.md` and `notes/audio.md` for the exact exports, hooks and call order.
+
+`shell` and `overlay` agree on one call: `flat.render({ snap, fx, d, timelines, glActive, persp, touch, padSide })`, unchanged from today; everything new that `flat.js` needs is in `snap` and `fx`. The director's read-only view `d` keeps its current field names (`showing`, `timeline`, `kind`, `view`, `sceneInfo`, `phrase`, `veil`, `strobe`, `invertUntil`, `bite`, `biteAt`, `cutAt`, `chaos`, `variant`): `timeline` is the universe id, `kind` is `'2d'` or `'3d'`, `view` is `'board'` or `'pov'`.
+
+In wave 2 the rules files have no stream of their own: `shell` may make small additive fixes there and must keep their tests passing. One request is open: expose the mushroom's remaining ticks as `snap.mushroom.ttl`.
 
 **Wave 3 — one session, `finish`**
 

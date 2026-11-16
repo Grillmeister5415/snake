@@ -192,3 +192,90 @@ test('audio.js: every method is safe without Web Audio', async () => {
   c.cut();
   c.stop();
 });
+
+// ---- setBpm (LEVELS_PLAN 7.2) -------------------------------------------------
+
+test('setBpm keeps index and phase continuous, then runs at the new rate', () => {
+  const c = fakeClock(5);
+  const b = createBeat({ bpm: 112 });
+  b.setTimeSource(c.fn);
+  b.start();
+  c.t = 5 + b.period * 7.3;
+  const before = b.position();
+  assert.equal(b.setBpm(152), 152);
+  assert.equal(b.bpm, 152);
+  near(b.period, 60 / 152);
+  near(b.position(), before, 1e-9);
+  assert.equal(b.index(), 7);
+  near(b.phase(), 0.3, 1e-6);
+  c.t += b.period * 2; // two beats at 152
+  near(b.position(), before + 2, 1e-9);
+  c.t += 60 / 152;
+  near(b.position(), before + 3, 1e-9);
+});
+
+test('setBpm: timeAt and position agree from the change on', () => {
+  const c = fakeClock(0);
+  const b = createBeat({ bpm: 120 });
+  b.setTimeSource(c.fn);
+  b.start();
+  c.t = 3.1;
+  b.setBpm(140);
+  for (const beatPos of [6.3, 7, 12.75, 40]) near(b.position(b.timeAt(beatPos)), beatPos, 1e-9);
+  near(b.timeAt(b.position() + 1) - c.t, 60 / 140, 1e-9);
+});
+
+test('setBpm: a ramp of many changes never moves the position backwards', () => {
+  const c = fakeClock(0);
+  const b = createBeat({ bpm: 112 });
+  b.setTimeSource(c.fn);
+  b.start();
+  let prev = -1;
+  for (let i = 0; i <= 200; i++) {
+    c.t = i * 0.05;
+    const p0 = b.position();
+    assert.ok(p0 >= prev, 'monotonic');
+    b.setBpm(112 + 4 * (i % 11));
+    near(b.position(), p0, 1e-9);
+    prev = p0;
+  }
+});
+
+test('setBpm while idle changes the period; start still begins at beat 0', () => {
+  const c = fakeClock(9);
+  const b = createBeat();
+  b.setTimeSource(c.fn);
+  b.setBpm(120);
+  assert.equal(b.bpm, 120);
+  near(b.period, 0.5);
+  b.start();
+  assert.equal(b.index(), 0);
+  c.t = 9 + 2.25;
+  assert.equal(b.index(), 4);
+  near(b.phase(), 0.5, 1e-9);
+});
+
+test('setBpm ignores invalid values and clamps extremes', () => {
+  const b = createBeat({ bpm: 128 });
+  for (const v of [NaN, -1, 0, 'fast', null, undefined, Infinity]) assert.equal(b.setBpm(v), 128);
+  assert.equal(b.bpm, 128);
+  assert.equal(b.setBpm('140'), 140, 'numeric strings are accepted');
+  assert.equal(b.setBpm(5000), 400);
+  assert.equal(b.setBpm(1), 20);
+});
+
+test('setBpm with a jittery or rewinding source stays continuous', () => {
+  const c = fakeClock(0);
+  const b = createBeat({ bpm: 112 });
+  b.setTimeSource(c.fn);
+  b.start();
+  c.t = 4;
+  const p1 = b.position();
+  c.t = 3.95; // jitter, held
+  b.setBpm(150);
+  near(b.position(), p1, 1e-9);
+  c.t = 1; // rewind, rebased
+  near(b.position(), p1, 1e-9);
+  c.t = 1 + 60 / 150;
+  near(b.position(), p1 + 1, 1e-9);
+});

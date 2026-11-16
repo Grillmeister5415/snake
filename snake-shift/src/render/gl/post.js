@@ -8,6 +8,9 @@
 // are inside). Pixels inside it are discarded, so the board stays bit-identical to the
 // direct render; samples that land on it fall back to the undisplaced pixel, so the board
 // never smears into the scenery either.
+// engine-ext (LEVELS_PLAN 5.3, 5.5): up to 8 extra protected volumes (parallelepipeds, uXR: 3 rows per
+// volume mapping world to 0..1 local coordinates), for items(d) meshes and F.protect quads. uXN.y = 1
+// drops the board volume (custom board). With uXN = (0, 0) the mask is exactly the board volume as before.
 // createPost(gl) never throws; `ok` is false when the program failed, and capture() is
 // false when the texture cannot be made: the engine then keeps the direct frame.
 
@@ -36,6 +39,8 @@ uniform vec2 uTap[8];   // glow tap offsets in uv
 uniform vec3 uEye, uCamF, uCamR, uCamU;   // camera; R and U already scaled by tanX, tanY
 uniform vec3 uBoxMin, uBoxMax;            // board volume, world units
 uniform float uKeep;                      // 1: write board pixels through (buffer mode), 0: discard (copy mode)
+uniform vec2 uXN;                         // x extra volume count (0..8), y 1 = no board volume
+uniform vec4 uXR[24];                     // extra volumes: local_k = dot(row_k.xyz, p) + row_k.w, inside when all in 0..1
 
 float hash12(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -43,16 +48,35 @@ float hash12(vec2 p) {
   return fract((p3.x + p3.y) * p3.z);
 }
 
-// 1.0 where the camera ray through uv crosses the board volume.
+// 1.0 where the ray from the eye along d crosses one of the extra protected volumes.
+float onExtra(vec3 d) {
+  for (int i = 0; i < 8; i++) {
+    if (float(i) >= uXN.x) break;
+    vec4 r0 = uXR[i * 3], r1 = uXR[i * 3 + 1], r2 = uXR[i * 3 + 2];
+    vec3 lo = vec3(dot(r0.xyz, uEye) + r0.w, dot(r1.xyz, uEye) + r1.w, dot(r2.xyz, uEye) + r2.w);
+    vec3 ld = vec3(dot(r0.xyz, d), dot(r1.xyz, d), dot(r2.xyz, d));
+    ld += vec3(lessThan(abs(ld), vec3(1e-7))) * 1e-7;
+    vec3 t0 = -lo / ld, t1 = (1.0 - lo) / ld;
+    vec3 a = min(t0, t1), b = max(t0, t1);
+    float tn = max(max(a.x, a.y), a.z), tf = min(min(b.x, b.y), b.z);
+    if (tf >= max(tn, 0.0)) return 1.0;
+  }
+  return 0.0;
+}
+
+// 1.0 where the camera ray through uv crosses the board volume (or an extra protected volume).
 float onBoard(vec2 uv) {
   vec2 n = uv * 2.0 - 1.0;
   vec3 d = uCamF + n.x * uCamR + n.y * uCamU;
   d += vec3(lessThan(abs(d), vec3(1e-6))) * 1e-6;
-  vec3 inv = 1.0 / d;
-  vec3 t0 = (uBoxMin - uEye) * inv, t1 = (uBoxMax - uEye) * inv;
-  vec3 a = min(t0, t1), b = max(t0, t1);
-  float tn = max(max(a.x, a.y), a.z), tf = min(min(b.x, b.y), b.z);
-  return tf >= max(tn, 0.0) ? 1.0 : 0.0;
+  if (uXN.y < 0.5) {
+    vec3 inv = 1.0 / d;
+    vec3 t0 = (uBoxMin - uEye) * inv, t1 = (uBoxMax - uEye) * inv;
+    vec3 a = min(t0, t1), b = max(t0, t1);
+    float tn = max(max(a.x, a.y), a.z), tf = min(min(b.x, b.y), b.z);
+    if (tf >= max(tn, 0.0)) return 1.0;
+  }
+  return uXN.x > 0.5 ? onExtra(d) : 0.0;
 }
 
 // A sample that lands on the board falls back to the centre pixel.

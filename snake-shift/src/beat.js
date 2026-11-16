@@ -2,7 +2,8 @@
 //
 // createBeat({ bpm = 132 } = {})
 // → { bpm, running, setTimeSource(fn), start(), stop(), index(), phase(), pulse() }
-//   plus extras used by audio.js: period, now(), position(t?), timeAt(beat), sample()
+//   plus extras used by audio.js: period, now(), position(t?), timeAt(beat), sample(),
+//   setBpm(bpm) (LEVELS_PLAN 7.2: phase-continuous tempo change)
 //
 // Pure: no DOM, no audio. Time comes from a function returning seconds, so the
 // clock can follow the audio clock (audio.js) or the frame clock (default:
@@ -13,6 +14,9 @@
 // - A source that runs backwards by a little (jitter) is held; by a lot (audio
 //   context resumed after a suspend) it is rebased. Position never goes back.
 // - A source that throws or returns a non-number falls back to the frame clock.
+// - setBpm() keeps the current position (index and phase) and changes only the
+//   rate from now on. No tempo map is kept: position(t) for a t before the last
+//   change is extrapolated with the new tempo, so ask about now or the future.
 
 const JUMP = 0.2; // seconds: larger backward steps are rebased, smaller ones held
 
@@ -30,9 +34,12 @@ function read(fn) {
   }
 }
 
+const BPM_MIN = 20;
+const BPM_MAX = 400;
+
 export function createBeat({ bpm = 132, decay = 5.5 } = {}) {
-  bpm = Number.isFinite(bpm) && bpm > 0 ? bpm : 132;
-  const period = 60 / bpm;
+  bpm = Number.isFinite(bpm) && bpm > 0 ? Math.min(BPM_MAX, Math.max(BPM_MIN, bpm)) : 132;
+  let period = 60 / bpm;
   let source = perfNow;
   let t0 = 0; // source time of beat 0
   let last = NaN; // last time handed out, for the monotonic guard
@@ -73,8 +80,29 @@ export function createBeat({ bpm = 132, decay = 5.5 } = {}) {
   }
 
   return {
-    bpm,
-    period,
+    get bpm() {
+      return bpm;
+    },
+    get period() {
+      return period;
+    },
+    // Phase-continuous tempo change. Invalid values are ignored; returns the bpm in use.
+    setBpm(next) {
+      const n = Number(next);
+      if (!(Number.isFinite(n) && n > 0)) return bpm;
+      const b = Math.min(BPM_MAX, Math.max(BPM_MIN, n));
+      if (b === bpm) return bpm;
+      if (running) {
+        const t = now();
+        const pos = (t - t0) / period; // beats at the old tempo
+        period = 60 / b;
+        t0 = t - pos * period;
+      } else {
+        period = 60 / b;
+      }
+      bpm = b;
+      return bpm;
+    },
     get running() {
       return running;
     },

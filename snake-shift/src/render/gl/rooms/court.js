@@ -58,6 +58,40 @@
      d.beam(x0,y0,z0, x1,y1,z1, width, rgb, intensity, fade, halo) -> laser line (glow mode 4)
      glow mode 5 = smoke sheet (p1 seed, p2 density); F.povWalls = false hides the energy walls;
      F.snake.dotPoolBeat (default 0.6) sets how much the dot's floor pool pulses on the beat.
+   Added by engine-ext (LEVELS_PLAN 5), all optional; dev/gl.rooms.js (xstrip, xcube) uses every one:
+     ROOM_IDS also lists lane, hangar, mushroom, castle, abyss (a missing file is skipped).
+     Snapshots (LEVELS_PLAN 3.3): the engine honours snap.breaks and adjacency (never interpolates across a
+       break or between cells that are not neighbours), treats a null prevTail as no tail motion, draws
+       every cell where it is while snap.waiting is set, and draws no dot when snap.food is null.
+     instance.items(d) -> opaque meshes ON the board (the mushroom); called after snake and dot, both views,
+       never mirrored. Every d.mesh drawn here adds its world bounds to the post-effects mask, so items may
+       be taller than the board volume (0.46). Meshes only; glow extras belong in glows(d).
+     d.segs = { n, x, z, link }: smoothed segment centres (world x, z; head = 0); link[i] = 1 when segment i
+       is joined to i + 1. Draw a connection only where link is 1. d.progress: the tick fraction used
+       (1 at tick 0, dead or waiting). d.protectBox(x0, y0, z0, x1, y1, z1): keep a world box effect-free.
+     kit.aspect() -> canvas width / height (e.g. to pick F.camera.fovy inside frame()).
+     Lane (snap.space.kind === 'lane'): board-local rows sit against an origin gliding from space.prevY0 to
+       space.y0 over the tick, so snake, dot, pools, bite ring and the first-person camera move smoothly.
+       d.lane (bool); d.scroll = that smooth origin (absolute row of the window's top row; 0 outside lanes);
+       d.laneZ(Y) = world z of absolute lane row Y (= Y - d.scroll - rows/2 + 0.5); d.cellToWorld is
+       lane-aware. Repeating props: base = Math.floor(d.scroll / P) * P, place at d.laneZ(base + k * P).
+       GLSL, every room program: uLaneScroll = vec4(origin row, origin mod 256, 1 in lane space, tick
+       fraction). Absolute row under world z = z + uLaneScroll.x + uBoard.y - 0.5; for floor patterns use
+       p.y + uLaneScroll.y + uBoard.y with a period that divides 256 (stays precise on long runs).
+     F.board.open = true: the board is a strip cols wide running to the horizon both ways. Frame bands and
+       curbs on the two sides only, grid scrolls with the lane, first-person energy walls on the sides only
+       (grid on absolute rows), the post mask covers the whole strip. In lane space the dot is drawn from
+       snap.foodAt, so it shows on the strip ahead of the window.
+     F.custom = true: the engine draws no board panel, grid, frame band, curb, snake, dot, pools, bite rings
+       or energy walls, drops its board volume from the post mask, and calls instance.surface(d) instead.
+     instance.surface(d) -> opaque meshes in the main pass when F.custom: the room's own board, snake, dot.
+     F.camera = { eye, target, up = [0, 1, 0], fovy (vertical degrees, default 50), near = 0.1 } replaces
+       the engine camera in both views while set (any room; invalid values fall back).
+     F.protect = [quad, ...]: world quads the post pass keeps clean. quad = { origin, u, v, h } (corner, two
+       edge vectors, h = thickness each way along the normal, default 0.5) or four corners [[x, y, z] x 4]
+       in order. At most 8 volumes per frame together with item bounds; extras merge into one box.
+     F.floor = false skips the floor pass and the mirrored props (e.g. a cube floating in the sky).
+     createRoomRenderer option roomModules: { id: module } injects room modules (harness test rooms).
    Rules: never write game state; props stay outside the board and never in the wedge between
    the board-view camera and the near edge (|x| > cols/2 + 0.5 or z < -rows/2 - 0.5);
    nothing hangs above the board. Animate from fx.time; fx already honours both switches,

@@ -119,7 +119,8 @@ function makeFx(now) {
 }
 
 // ---------------- renderer ----------------
-const renderer = q.has('nogl') ? null : await createRoomRenderer(canvas, { cols: COLS, rows: ROWS });
+// The four built rooms by default (no 404s for rooms still being written); ?all loads every id in ROOM_IDS.
+const renderer = q.has('nogl') ? null : await createRoomRenderer(canvas, { cols: COLS, rows: ROWS, ...(q.has('all') ? {} : { roomIds: ['court', 'disco', 'plastic', 'bunker'] }) });
 window.__gl = { renderer, check: () => checkCells(), nullPath: () => nullPath(), S, setView };
 
 function fit() {
