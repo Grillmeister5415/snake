@@ -1,6 +1,8 @@
 # Request to the Tichu project: serve `snake.online-tichu.com`
 
-Written on 17 November 2026 from the Snake project. Nothing in Tichu has been changed. This is everything Snake needs from Tichu, to be done as a Tichu task through Tichu's own repository and release process.
+Written on 17 November 2026 from the Snake project. This is everything Snake needs from Tichu, to be done as a Tichu task through Tichu's own repository and release process.
+
+**Status (17 November 2026):** filed the same day as Tichu task T407, decision 0104, [pull request 160](https://github.com/Grillmeister5415/tichu/pull/160). Not merged, not released. Nothing on the droplet was changed for it.
 
 ## What Snake is
 

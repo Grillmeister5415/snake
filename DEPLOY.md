@@ -1,6 +1,6 @@
 # Deploying SNAKE//SHIFT
 
-**State on 17 November 2026:** the game's files are on the droplet and tested there in private. The site is **not public yet**. One step is open and it is not Snake's to take: Tichu's Caddy needs an entry for `snake.online-tichu.com` (see [First go-live](#first-go-live)).
+**State on 17 November 2026:** the game's files are on the droplet and tested there in private. The site is **not public yet**. Tichu's Caddy needs an entry for `snake.online-tichu.com`; that change is written and waits as [Tichu pull request 160](https://github.com/Grillmeister5415/tichu/pull/160) (Tichu task T407, decision 0104) for the owner's merge and release (see [First go-live](#first-go-live)).
 
 | | |
 |---|---|
@@ -83,8 +83,8 @@ Switches back to the release before the current one.
 |---|---|---|
 | DNS record for `snake.online-tichu.com` | owner | done |
 | Upload the files, test them on the droplet in private | Snake | done, 17 November 2026 |
-| Caddy entry for the host, and a Tichu decision that lets `snake` join `caddy-edge` | **Tichu** | **open**, see [deploy/TICHU_CADDY_REQUEST.md](deploy/TICHU_CADDY_REQUEST.md) |
-| Start the container: `deploy/deploy.sh --start` | Snake | open, only after the step above is approved |
+| Caddy entry for the host, and a Tichu decision that lets `snake` join `caddy-edge` | **Tichu** | **pull request open**: [tichu#160](https://github.com/Grillmeister5415/tichu/pull/160) (T407, decision 0104). The owner merges; the release (recreating Tichu's Caddy, a few seconds offline) needs the owner's yes. Background: [deploy/TICHU_CADDY_REQUEST.md](deploy/TICHU_CADDY_REQUEST.md) |
+| Start the container: `deploy/deploy.sh --start` | Snake | open, only after the pull request above is merged |
 | Checks below | Snake | open |
 
 The container is deliberately not running yet. Tichu's runbook says `caddy-edge` holds Caddy and `unser-jahr` and nothing else, and its release check lists the members. Joining before Tichu's documents allow it would break that check.
