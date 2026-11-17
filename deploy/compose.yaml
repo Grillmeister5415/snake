@@ -15,7 +15,11 @@ services:
     command: caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
     user: '1000:1000'
     read_only: true
+    # Every capability is dropped except the one the image's caddy binary is marked with ("may
+    # bind low ports"): without it in the allowed set the kernel refuses to start the binary at
+    # all. Snake listens on 8080 and never uses it.
     cap_drop: [ALL]
+    cap_add: [NET_BIND_SERVICE]
     security_opt: ['no-new-privileges:true']
     mem_limit: 96m
     pids_limit: 64
