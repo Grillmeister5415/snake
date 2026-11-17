@@ -3,8 +3,10 @@
 Snake where every dot eaten snaps the game to another universe: sixteen of them, shown as flat 2D
 boards, real WebGL rooms, and now and then a first-person view. The game picks the universe and its
 look at random; the player never chooses. Three rare special universes change the rules and are held
-for four to six bites, cutting between their 2D and 3D look on each bite.
-Plain ES modules, no dependencies, no build step, everything generated in code (~150 KB gzipped).
+for four to six bites, cutting between their 2D and 3D look on each bite; about one shift in ten
+goes to one of them (`SPECIAL.weight` in `src/rules-config.js`).
+Plain ES modules, no dependencies, no build step, everything generated in code (~285 KB gzipped,
+~225 KB with brotli; 943 KB raw).
 
 ## Run
 
@@ -23,8 +25,15 @@ always shows the latest code. Tests: `npm test` (Node 20+, uses `node --test`).
 
 Every run starts with 3 lives, at most 5, shown as five slots beside the score in the current
 universe's own icon. A collision costs one: the snake respawns short at a safe spot in board view
-with score and universe intact, and waits for a direction. Zero lives ends the run. In Mushroom Land
+with score and universe intact, and breathes gently while it waits for a direction. Zero lives ends the run. In Mushroom Land
 a mushroom (beside the dot, gone after 80 steps) is food and adds a life.
+
+## Music
+
+One procedural track that never stops (Web Audio, no files). Every five foods add a layer and 4 BPM
+(112 to 152); every bite is a drop into the new universe's kit on the same bar position, and a riser
+builds while you go hungry. A lost life tape-stops and muffles the mix until you move; 3310 Ghost is
+only clicks, Abyssal Cathedral plays half-time. Mute with M; nothing sounds before the first click.
 
 ## Universes
 
@@ -61,11 +70,11 @@ Both are on the title and in settings, and are saved locally.
 | `?debug&lives=5` | starting lives (1 to 5) |
 | `?seed=abc` | fixed run |
 | `?nogl` | no WebGL: the four built rooms are drawn in 2D perspective, new universes in 2D, no first person |
-
-The universe, look, score and lives switches work only together with `?debug`, so a player cannot use them to choose.
 | `?start=150&ramp=1.5&cap=95` | speed: ms per step at start, ms faster per dot, fastest ms |
 
-The server sends no cache headers: after editing, switch between `localhost` and `127.0.0.1` to see fresh code.
+The universe, look, score and lives switches work only together with `?debug`, so a player cannot use them to choose.
+`dev/finish.js` holds the whole-game browser checks: load `?debug&auto`, then
+`const F = await import('/dev/finish.js'); F.hook(); F.sweep()` (also `flow`, `frames`, `space`, `crash`, `offBoard`, `audioOrder`).
 
 ## Folder map
 
@@ -84,6 +93,6 @@ src/render/registry.js     loads whatever modules exist, with stubs
 src/render/timelines/*.js  2D looks (and life() icons)
 src/render/gl/             WebGL engine and the rooms (3D looks, life() icons)
 src/render/persp.js        Canvas 2D stand-in for the rooms without WebGL
-tests/                     rules, lives, spaces, flow, director, music, beat (node --test)
+tests/                     rules, lives, spaces, flow, director, music, beat, replay (node --test)
 dev/                       harness pages per stream; notes/ build notes per stream
 ```

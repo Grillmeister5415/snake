@@ -493,7 +493,9 @@ export function create(kit) {
         if (!hf && n > 1) hf = norm(add(h.pos, scale(P[1].pos, -1)));
         if (!hf) hf = CUBE_FACES[h.cell.f].right;
       }
-      const pulse = 1 + 0.05 * num(fx.beat) * (0.4 + k);
+      // respawn wait: the short snake breathes gently (still under Reduced motion)
+      const breathe = s.waiting === 'respawn' && !fx.reducedMotion ? 1 + 0.12 * (0.5 + 0.5 * Math.sin(t * 5)) : 1;
+      const pulse = (1 + 0.05 * num(fx.beat) * (0.4 + k)) * breathe;
       for (let i = n - 1; i >= 1; i--) {
         const p = P[i];
         const j = P[i - 1];

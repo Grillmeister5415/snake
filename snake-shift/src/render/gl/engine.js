@@ -566,8 +566,11 @@ async function build(canvas, opts) {
   function drawSnake(Fr, snap, fx, n, view) {
     const sn = Fr.snake || {};
     const body = sn.body, headMat = sn.head || body;
+    // Respawn wait (LEVELS_PLAN 4.4): the short snake breathes gently; still under Reduced motion.
+    const wp = snap.waiting === 'respawn' && !fx.reducedMotion ? 1 + 0.14 * (0.5 + 0.5 * Math.sin(num(fx.time, 0) * 5)) : 1;
     if (body && n > 1) {
-      const bs = sn.bodySize || [0.78, 0.26, 0.78];
+      const bs0 = sn.bodySize || [0.78, 0.26, 0.78];
+      const bs = wp === 1 ? bs0 : [bs0[0] * wp, bs0[1], bs0[2] * wp];
       const geom = sn.bodyGeom || 'block';
       for (let i = n - 1; i >= 1; i--) {
         if (sn.segment) sn.segment(i, n, body, fx, snap);
@@ -575,7 +578,8 @@ async function build(canvas, opts) {
       }
     }
     if (n > 0 && view !== 'pov' && headMat) {
-      const hs = sn.headSize || [0.88, 0.3, 0.88];
+      const hs0 = sn.headSize || [0.88, 0.3, 0.88];
+      const hs = wp === 1 ? hs0 : [hs0[0] * wp, hs0[1], hs0[2] * wp];
       const hh = Math.min(hs[1], 0.3);
       const ry = MESH_RY[snap.dir] ?? 0;
       m4.trs(HEADM, segX[0], 0.004, segZ[0], ry, hs[0], hh, hs[2]);

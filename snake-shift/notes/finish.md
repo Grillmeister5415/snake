@@ -1,33 +1,32 @@
-# finish (wave 3) — notes
+# finish (levels wave 3)
 
-## Done
-- Step 1: all 15 scenes held with `?scene=<id>&lock&auto&debug` at 1280×720 on port 4190 (ss3-finish could not start: 5-server cap): lcd, arcade, acid, kombat, desktop, timewarp, wrong, court, court-pov, disco, disco-pov, plastic, plastic-pov, bunker, bunker-pov. Each played 5 s on the synthetic clock (score 1–6), GL canvas visible exactly for rooms, 0 console errors.
-- Step 2: HUD plate and panels readable over every scene (backing plate). Pixel Kombat: its fight bar fills the top ~8–50 px, so under `data-timeline="kombat"` the buttons drop to 54 px and the score plate moves to the bottom-left margin (style.css); checked at 1280×720 and 390×844. Scenes now carry `clock` from meta; the Bunker HUD reads "2026 · 04:37".
-- Step 3: `persp.js` wired. When the engine is null (`?nogl` or no WebGL) `registry.loadPersp()` imports persp.js and each `gl/rooms/<id>.js` for its meta only (they import nothing), falling back to FALLBACK_ROOMS; rooms get `views: ['board']`, so no first person without WebGL. `flat.render` draws them via persp; strobes go through the inversion overlay as in rooms. `?nogl` 60 s autopilot: 40 cuts over 9 scenes incl. court/disco/plastic/bunker, 3 Total Resets, 0 errors.
-- Step 4: free runs, 300 s synthetic autopilot each at 1280×720 with GL. Wild (seed free1): 211 cuts over all 15 scenes, timewarp 5 + wrong 6 (5%), 23 Total Resets, 4 deaths, inversion on 9% and strobe on 6.5% of frames, 0 errors. Reduced flash (seed free2): 60 cuts over all 15 scenes, min cut gap 3520 ms, 0 swing violations, 0 inversion/strobe/punch/glitch frames, beat ≤ 0.150, 7 Total Resets, 0 errors. Tests: 5 new in `tests/director.test.js` using the real metas of all 11 timelines (15 scenes; mix, rarity, rare-after-rare, resets land on LCD, reduced-flash limits, reduced motion, no-GL) and `loadPersp()`; `npm test` 49/49.
-- Step 5, master prompt §13 checks (browser runs on the synthetic clock, plus `npm test`):
-  1. Controls: `__ss.drive` with real arrow keydowns, 45 bites: 127 turns, each applied on the next tick, in 13 scenes incl. all four `-pov` (an earlier drive also passed timewarp and wrong); swipes were verified by integrate.
-  2. One segment + one point: an `ate` listener saw length = 3 + score on all 90 bites of two runs; sim tests check it over long autopilot runs.
-  3. Collisions: both drives ended in a `wall` death outside LCD; sim tests cover all four walls (no wrap), self, vacating tail.
-  4. Grid: every screenshot shows one north-up 16×16 grid; rooms keep screen-up = grid-up, first person has a north-up minimap; nothing writes the sim (frozen snapshots, replay test).
-  5. Shifts preserve state: seed `same`, 40 s autopilot with WebGL in wild mode (26 cuts, reduced motion toggled mid-run) and with `?nogl` + reduced flash (10 cuts): identical hash over all 307 ticks, score 26 both. The replay test forces every scene and view on each bite.
-  6. Effects: flat scenes draw glitch and strobe before the board; rooms and persp strobe through the `difference` overlay, which inverts but never hides; phrase cards sit in the band above the board; Kombat HUD moved off its fight bar. The sim tick never sees the renderers (replay test).
-  7. Muted + `?nogl`: PLAY click, 20 bites by keys over 9 scenes (rooms via persp), 0 GL frames, wall death, REALITY COLLAPSED shown, 0 errors.
-- Step 6, phone 390×844: title fits with no scroll; real taps on PLAY, settings, the new switch and RESUME; a 14-bite swipe run through court-pov to a wall death and REALITY COLLAPSED; first person screenshotted. New: **Touch buttons** switch in settings (`prefs.dpad`, off by default): a 4-way pad sized by main.js to the margin the board leaves (under it in portrait, 58 px keys at 390×844; beside it in landscape), real taps steer the sim; hint becomes "TAP AN ARROW TO START" and moves to the top; first-person keycaps say "tap ←", and in landscape the map moves left and the pad replaces the keycaps. Settings now also opens before the first move (it did nothing in the ready state). **Quality scaling** (`createQuality` in fx.js): smoothed frame interval over 28 ms for 2 s steps the canvas resolution ×0.75, then ×0.5; gaps over 250 ms and hidden tabs are ignored. Unit-tested; not observable live here because the hidden pane runs no animation frames.
-- Step 7: a clean load of `index.html` logs nothing (the scene list is `?debug` only). audio.js: oscillator frequencies clamped to 20 kHz (smallest fix) after "outside nominal range" warnings in play; a 40-bite run with live audio through all 15 scenes then logged nothing.
-- Step 8: `README.md` (57 lines). Size: `index.html` + `style.css` + `src/` = 149 KB gzipped (464 KB raw). `npm test` 50/50. Final sweep with fx-pass's latest GL code: 15/15 scenes render, 0 errors.
+Checked in the real game at localhost:4321, 1280×720, `?debug` synthetic clock (`__ss.run`); helpers in `dev/finish.js`.
 
-## Not done / known issues
-- Quality scaling not seen live (hidden pane: no animation frames); logic unit-tested only. Not tried on a real phone.
-- No first person without WebGL (persp has board view only). If the WebGL context is lost mid-run, rooms stop (persp loads only when the engine is missing at start).
-- Kombat's round box shows score % 100; the DOM score plate (bottom-left in kombat) shows the full score. Inside `wrong`, a torn kombat region can put its fight bar under the DOM HUD for a moment.
-- Room readability at phone size was checked for court-pov only; other rooms were screenshotted at 1280×720.
+## Works (evidence)
+- All 16 universes in every look (29 pairs incl. lane 2d/3d/pov, castle 2d/3d) render, play on autopilot, 0 console errors; `?nogl`: all 16 in 2D/stand-in, 0 errors.
+- Flow, 540 s autopilot (seed final1): 278 shifts, specials 9% (holds all 4–6), never two in a row, 93 held bites all flip the look (castle alternates 2d/3d), every bite has its impact; the five new universes seen in both looks.
+- Lane: head ran from row 1 to −310, no end wall, side walls lethal; 2D board scrolls between ticks; dot ahead reached, arrow shown whenever it is off the board (2d, 3d, pov). Cube: 5 faces, 11 seam crossings, no deaths, camera turns, map + arrow; 2D slides between faces (cut under Reduced motion).
+- Mushroom at 5 lives is still food (`lifeGained:false`), below 5 adds a life.
+- Lives by real key presses in box (from pov), lane and cube: length 3, waits for a key, board look, score and universe kept, HUD aria "n of 5"; last loss → REALITY COLLAPSED. HUD icons differ per universe (all 16 export `life()`).
+- Off-board body after lane→box and cube→box: harmless, used up from the tail (30→0), no life lost.
+- Calm: 1150 lcd/abyss frames, 0 inversion/strobe/glitch/split, beat ≤ 0.15; `fx.calm` reaches the room renderer.
+- Default: inversion 7.4%, strobe 5.8% of frames. Reduced flash: 0 inversion/strobe/glitch, veil on every shift. Reduced motion: 0 first-person frames in the random flow.
+- No choice: without `?debug` the universe/look/score/lives switches are ignored, `__ss` is absent, keys are only steer/pause/mute/confirm, the only inputs are the three switches.
+- Sound: unlocked by a real click; 60 bites, 2 gains, 4 losses, game over: call order matches notes/audio.md, 0 errors. **Nobody listened.**
+- `npm test`: 136/136, incl. new `tests/replay.test.js` (recorded inputs replayed under 7 director/switch setups, every tick equal, box+lane+cube).
+- Size (`index.html`, `style.css`, `src/`): 943 KB raw, 284 KB gzip as one stream, 318 KB gzip per file, 224 KB brotli.
 
-## Defaults chosen
-- Touch buttons off by default, only in the settings panel (not on the title, which keeps just the two switches).
-- Quality: 28 ms smoothed frame time for 2 s → ×0.75, then ×0.5 resolution; never back up during a session.
+## Changed
+- `rules-config.js`: `SPECIAL.weight` 0.85 → 1.2 and the fallback table's weights set to the real metas' (rooms 3 etc.). With the real weights the game had ~8% specials; now ~10% (40–100 foods), ~9.5% over 300+.
+- Respawn pulse (`waiting === 'respawn'`): engine `drawSnake` and castle room breathe the snake's width; `flat.js` outlines the snake in 2D looks that do not animate it (all but abyss, mushroom, lane, castle). Off under Reduced motion.
+- `tests/director.test.js`: shift-count floor 200 → 120 (run restarts on death; seed-dependent). README: music, size, switches table fixed.
 
-## Morning checklist for the owner
-1. Play by keys and on a phone; settle speed: `?start=150&ramp=1.5&cap=95` are still the plan defaults (try `?start=140&ramp=2&cap=85` for a faster feel).
-2. Plan §13 open questions, all still on defaults: opening label "LCD Ghost, 1999" (brief says "Nokia Ghost"); wild strobe bursts up to ~0.4 s; first person skipped under reduced motion; Desktop Error included as the eleventh timeline; no Six Finger Punch branding.
-3. Watch one wild run with sound for taste: inversion ~9% and strobe ~6.5% of frames over 5 min.
+## Not done / known
+- Reduced-flash veil numbers kept (from 0.55, hold 0.35): average dimming 16%, median jump at a cut +0.34. Not judged by eye.
+- Debug `look=pov` still forces first person under Reduced motion (debug only). Phone size not rechecked this wave.
+- Single-seed browser runs vary 7.6–9% specials; seeded flow sim over many seeds gives ~10%.
+
+## Morning checklist
+1. Play one wild run with sound by keys; listen to drops, life loss, stage 8+.
+2. Look at the lane and castle 2D looks and the waiting outline; try Reduced flash for comfort.
+3. Commit wave 3 (new: lane.js, castle.js, replay.test.js, dev/finish.js).

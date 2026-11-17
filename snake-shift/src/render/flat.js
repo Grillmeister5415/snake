@@ -11,6 +11,9 @@ const PHRASE_FONT = '"Arial Black", "Helvetica Neue", Impact, system-ui, sans-se
 const HUD_BAND = 60; // DOM HUD height reserved at the top (CSS px)
 
 /** Shared layout of plan 15.3. */
+// 2D looks that animate the respawn wait themselves; flat.js outlines the rest.
+const OWN_WAIT_PULSE = new Set(['abyss', 'mushroom', 'lane', 'castle']);
+
 export function computeLayout(w, h, cols, rows) {
   const cell = Math.max(4, Math.floor(Math.min((0.94 * w) / cols, (0.8 * h) / rows)));
   const bw = cell * cols, bh = cell * rows;
@@ -594,6 +597,28 @@ export function createFlatRenderer({ canvas, invertEl, cols, rows, onBroken = ()
     }
   }
 
+  /**
+   * Respawn wait (LEVELS_PLAN 4.4) for 2D looks that do not animate it themselves: a soft outline
+   * around each snake cell that breathes slowly (steady under Reduced motion). Never a flash.
+   */
+  function waitHalo(snap, fx) {
+    if (!snap || snap.waiting !== 'respawn' || !snap.alive || !snap.snake) return;
+    const t = typeof fx.now === 'number' ? fx.now : performance.now();
+    const a = fx.reducedMotion ? 0.45 : 0.3 + 0.35 * (0.5 + 0.5 * Math.sin(t / 280));
+    const c = L.cell, pad = Math.max(1.5, c * 0.12);
+    ctx.save();
+    ctx.lineJoin = 'round';
+    for (const [col, lw] of [[`rgba(0,0,0,${a * 0.8})`, Math.max(3, c * 0.16)], [`rgba(255,255,255,${a})`, Math.max(1.5, c * 0.07)]]) {
+      ctx.strokeStyle = col;
+      ctx.lineWidth = lw;
+      for (const p of snap.snake) {
+        if (p.x < 0 || p.y < 0 || p.x >= L.cols || p.y >= L.rows) continue;
+        ctx.strokeRect(L.bx + p.x * c - pad, L.by + p.y * c - pad, c + 2 * pad, c + 2 * pad);
+      }
+    }
+    ctx.restore();
+  }
+
   function render({ snap, fx, d, timelines, glActive, persp = null, touch = false, padSide = false }) {
     ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     frameNo++;
@@ -631,6 +656,7 @@ export function createFlatRenderer({ canvas, invertEl, cols, rows, onBroken = ()
       if (sl && slide.from) drawSlid(drawBoard, sl);
       else drawBoard();
       if (cube) captureBoard(capKey);
+      if (!OWN_WAIT_PULSE.has(id)) waitHalo(snap, fx);
       spaceOverlay(snap, fx, info, '2d', padSide);
     } else {
       ctx.clearRect(0, 0, w, h);

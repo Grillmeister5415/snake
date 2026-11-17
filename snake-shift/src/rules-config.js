@@ -33,7 +33,7 @@ export const CUBE = Object.freeze({
 
 // Special universes (lane, mushroom, castle): held, rare, never two in a row.
 export const SPECIAL = Object.freeze({
-  weight: 0.85, // started at 0.9; tuned: ~10.8% of shifts in 30-60 food runs, ~9.8% over 2,000
+  weight: 1.2, // started at 0.9; finish tuned it against the real metas' weights: ~10% of shifts in 40-100 food runs, ~9.5% over 300+
   holdMin: 4,   // a special universe lasts 4..6 food events
   holdMax: 6,
   minScore: 4,  // none arrives before the fourth food
@@ -62,12 +62,13 @@ const u = (id, more = {}) => Object.freeze({
 
 // The sixteen universes of LEVELS_PLAN 2.1. Used when createSim gets no table.
 export const UNIVERSES = Object.freeze([
-  u('lcd'), u('arcade'), u('acid'), u('kombat'), u('desktop'),
+  // Weights match the game's module metas (director.buildUniverses), so tests measure the real mix.
+  u('lcd'), u('arcade', { weight: 3 }), u('acid', { weight: 2 }), u('kombat', { weight: 3 }), u('desktop', { weight: 2 }),
   u('timewarp', { rare: true }), u('wrong', { rare: true }),
-  u('court', { room: true, weight: 2 }), u('bunker', { room: true, weight: 2 }),
-  u('disco', { room: true, weight: 2 }), u('plastic', { room: true, weight: 2 }),
+  u('court', { room: true, weight: 3 }), u('bunker', { room: true, weight: 3 }),
+  u('disco', { room: true, weight: 3 }), u('plastic', { room: true, weight: 3 }),
   u('lane', { rules: 'lane', room: true }),
-  u('hangar', { room: true, weight: 2 }),
+  u('hangar', { room: true, weight: 3 }),
   u('mushroom', { mushrooms: true, room: true }),
   u('castle', { rules: 'cube', room: true }),
   u('abyss', { room: true, weight: 2 }),
