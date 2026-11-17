@@ -20,8 +20,12 @@ export function createUI({ prefs, onPlay, onAgain, onPauseToggle, onMuteToggle, 
   let inPlay = false; // HUD showing (ready, playing, paused)
   let touchHint = false;
   let hintKind = 'start'; // 'start' | 'respawn'
+  let crash = false;       // the scene shows its crash screen (Desktop Error wall / self crash)
   const hintText = () => {
-    if (hintKind === 'respawn') return prefs.get().dpad ? 'TAP A DIRECTION' : touchHint ? 'SWIPE A DIRECTION' : 'PRESS A DIRECTION';
+    if (hintKind === 'respawn') {
+      const t = prefs.get().dpad ? 'TAP A DIRECTION' : touchHint ? 'SWIPE A DIRECTION' : 'PRESS A DIRECTION';
+      return crash ? `${t} TO REBOOT` : t;
+    }
     return prefs.get().dpad ? 'TAP AN ARROW TO START' : touchHint ? 'SWIPE TO START' : 'PRESS AN ARROW TO START';
   };
   const switches = [...document.querySelectorAll('input[data-pref]')];
@@ -199,6 +203,15 @@ export function createUI({ prefs, onPlay, onAgain, onPauseToggle, onMuteToggle, 
       el.again.focus({ preventScroll: true });
     },
     hideOver() { show(el.over, false); },
+    /**
+     * The scene paints a crash screen for this lost life or final crash: the respawn hint reads
+     * "... TO REBOOT" as plain text and the game-over panel drops its chrome (style.css).
+     */
+    setCrash(on) {
+      crash = !!on;
+      root.classList.toggle('crash-screen', crash);
+      el.hint.textContent = hintText();
+    },
     setScore(n, pop) {
       if (n === lastScore && !pop) return;
       lastScore = n;

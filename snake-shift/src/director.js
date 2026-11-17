@@ -67,6 +67,9 @@ export function buildUniverses({ flats = {}, rooms = {}, glRooms = null, perspRo
         hud: meta.hud || null,
         rare: !!b.rare,
         calm,
+        // The look paints its own crash screen for a wall or self crash (Desktop Error): the
+        // director then skips the life-lost / death inversion, strobe, veil and phrase.
+        crashScreen: !!meta.crashScreen,
       });
     }
     const weight = (roomMeta && roomMeta.weight) || (flat && flat.weight) || b.weight || 1;
@@ -102,6 +105,9 @@ export function clearAhead(snap, n = D.povClearCells) {
   }
   return true;
 }
+
+/** Crash reasons that show a crash screen; `complete` (board full) is a win and never does. */
+const CRASH_REASONS = new Set(['wall', 'self']);
 
 /**
  * createDirector({ universes, seed, prefs, hasGL, first, phrases })
@@ -212,7 +218,7 @@ export function createDirector({
       visited: new Set([uid]), roomVisited: new Set(),
       chaos: 0, score: snap ? snap.score | 0 : 0, variant: 0, bite: null, biteAt: -Infinity,
       invertUntil: -Infinity, strobe: null, phrase: null, veil: null, veilState: null,
-      dead: false, locked, lastCut: null, resets: 0,
+      dead: false, locked, lastCut: null, resets: 0, crash: false, crashAt: -Infinity,
     };
     st.chaos = clamp01(st.score / D.chaosScore);
     if (u) {
@@ -351,22 +357,38 @@ export function createDirector({
     st.strobe = null;
     st.prevUntil = -Infinity;
     st.showing = st.scene;
+    const lives = e && Number.isFinite(e.lives) ? e.lives : 0;
+    if (crashScreen(info, (e && e.death) || (snap && snap.death), now)) {
+      // The look's own crash screen is the impact. The phrase still takes its draw, so the
+      // looks picked after this crash are the same as without the crash screen.
+      rng.int(1 << 30);
+      st.phrase = null;
+      st.biteAt = now;
+      return res;
+    }
     if (!p.reducedFlash && !(info && info.calm)) {
       st.invertUntil = now + D.lifeLostInvertMs;
       st.strobe = { at: now + D.lifeLostInvertMs, count: D.strobeMin + 1, dur: D.strobeWindowMs };
     } else if (p.reducedFlash) {
       startVeil((info && info.veil) || '#000000', now);
     }
-    const lives = e && Number.isFinite(e.lives) ? e.lives : 0;
     st.phrase = { text: lives === 1 ? 'LAST LIFE' : 'LIFE LOST', at: now, dur: D.phraseMs * 1.4, seed: rng.int(1 << 30) };
     st.biteAt = now;
     return res;
+  }
+
+  /** True (and the crash recorded) when the scene paints its own crash screen for this death. */
+  function crashScreen(info, death, now) {
+    st.crash = !!(info && info.crashScreen && death && CRASH_REASONS.has(death.reason));
+    if (st.crash) st.crashAt = now;
+    return st.crash;
   }
 
   function onDeath(snap, now) {
     st.dead = true;
     const p = prefs();
     const info = curInfo();
+    if (crashScreen(info, snap && snap.death, now)) return;
     if (!p.reducedFlash && !st.locked && !(info && info.calm)) {
       st.invertUntil = now + D.invertMaxMs;
       st.strobe = { at: now + D.invertMaxMs, count: D.strobeMin, dur: D.strobeWindowMs * 0.75 };
@@ -433,6 +455,7 @@ export function createDirector({
       chaos: st.chaos, score: st.score, variant: st.variant, bite: st.bite, biteAt: st.biteAt,
       invertUntil: st.invertUntil, strobe: st.strobe, phrase: st.phrase, veil: st.veil,
       locked: st.locked, lastCut: st.lastCut,
+      crash: st.crash, crashAt: st.crashAt,
     });
   }
 

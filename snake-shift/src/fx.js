@@ -30,7 +30,7 @@ export function createFallbackBeat({ bpm = 132 } = {}) {
  *   director: director.get() result; beat: createBeat()-like object; prefs: { reducedFlash, reducedMotion }
  *   snap: the simulation snapshot (lives, universe, rules)
  * Extra fields beyond 15.3 (additive): strobe, invert, glitch, split, scene, prev, view, timeline, kind.
- * LEVELS_PLAN 4.2: lives, maxLives, universe, look, calm, rules, waiting.
+ * LEVELS_PLAN 4.2: lives, maxLives, universe, look, calm, rules, waiting. Crash screen: crashAge.
  * Calm universes (lcd, abyss): no strobe, inversion, glitch or colour split; beat pulse capped at 15%.
  */
 export function createFx() {
@@ -109,6 +109,8 @@ export function createFx() {
       calm,
       rules: snap && snap.universe ? snap.universe.rules : 'box',
       waiting: snap ? snap.waiting || null : null,
+      // ms since the director recorded a crash-screen crash (Infinity when none since the reset)
+      crashAge: d && Number.isFinite(d.crashAt) ? Math.max(0, now - d.crashAt) : Infinity,
     };
   }
 

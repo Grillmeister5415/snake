@@ -365,6 +365,34 @@ h2 {
 .new { margin: 0 0 14px; font: 900 14px/1 var(--mono); letter-spacing: 0.3em; color: var(--cold); }
 #over .big { margin-top: 10px; }
 
+/* Crash screen (a scene that paints one: Desktop Error after a wall or self crash). The canvas is
+   a blue stop screen; the reboot line and the game-over panel are plain white monospace on it.
+   Scoped by the class, not the timeline, so a board-full ending looks as it always has. */
+:root.crash-screen #hint.respawn {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 4px 0;
+  color: #fff;
+  font: 700 15px/1.2 "Courier New", Courier, var(--mono);
+  letter-spacing: 0.08em;
+}
+:root.crash-screen #over {
+  background: transparent;
+  border: 0;
+  box-shadow: none;
+  color: #fff;
+  font-family: "Courier New", Courier, var(--mono);
+}
+:root.crash-screen #over h2 {
+  color: #fff;
+  text-shadow: none;
+  font: 700 clamp(24px, 6vw, 38px)/1.1 "Courier New", Courier, var(--mono);
+}
+:root.crash-screen #over .final,
+:root.crash-screen #over .new { color: #fff; font-family: "Courier New", Courier, var(--mono); }
+:root.crash-screen #over .final b { color: #fff; border-bottom-color: #fff; }
+
 @media (max-width: 520px) {
   .panel { padding: 20px 16px 16px; box-shadow: 5px 5px 0 var(--hot), -5px -5px 0 var(--cold); }
   .logo { text-shadow: 2px 0 0 var(--hot), -2px 0 0 var(--cold); }

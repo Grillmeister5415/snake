@@ -212,6 +212,7 @@ sim.on('lifeLost', (e) => {
   const snap = sim.snapshot();
   logEvent('lifeLost', { lives: e.lives, reason: e.death && e.death.reason });
   director.onLifeLost(e, snap, frameNow);
+  ui.setCrash(director.get().crash);
   audio.setGameplay({ clear: true });
   audio.setLives(e.lives);
   audio.lifeLost();
@@ -226,6 +227,7 @@ sim.on('died', (e) => {
   const snap = sim.snapshot();
   logEvent('died', { score: e.score, reason: e.death && e.death.reason });
   director.onDeath(snap, frameNow);
+  ui.setCrash(director.get().crash);
   audio.setGameplay({ clear: true });
   audio.setLives(0);
   audio.die();
@@ -251,6 +253,7 @@ function play() {
 
 function startRun() {
   clearTimeout(overTimer);
+  ui.setCrash(false);
   pausedFrom = null;
   sim.reset(nextSeed()); // waiting 'start'
   if (autopilot) autopilot.reset();
@@ -283,6 +286,7 @@ function respawn(dir) {
     if (turn) sim.queueTurn(turn);
   }
   sim.setPaused(false);
+  ui.setCrash(false);
   audio.respawned();
   mode = 'playing';
   ui.showPlaying();

@@ -382,3 +382,104 @@ test('real modules: valid scene info for every look, life() icons where exported
   assert.deepEqual(Object.keys(fb.rooms).sort(), [...OLD_ROOMS].sort());
   assert.ok(Object.values(fb.rooms).every((r) => r.views.length === 1 && r.views[0] === 'board'));
 });
+
+// Desktop Error paints its own blue crash screen for a wall or self crash (meta.crashScreen).
+const CRASH = buildUniverses({
+  flats: { ...FLATS, desktop: meta('desktop', LUMAS.desktop, { crashScreen: true }) },
+  rooms: ROOMS, glRooms: GL,
+});
+
+function inDesktop(universes, seed = 6) {
+  const d = createDirector({ universes, seed });
+  d.onShift({ from: 'lcd', to: 'arcade', index: 1 }, open(3), 0);
+  d.onShift({ from: 'arcade', to: 'desktop', index: 2 }, open(4), 1000);
+  assert.equal(d.get().universe, 'desktop');
+  return d;
+}
+const crashSnap = (reason, more = {}) => open(9, { universe: { id: 'desktop' }, death: { reason, cell: { x: 15, y: 8 } }, ...more });
+
+test('crash screen: a Desktop life loss and final crash schedule no inversion, strobe, veil or phrase', () => {
+  assert.equal(byId(CRASH, 'desktop').info['2d'].crashScreen, true);
+  assert.equal(byId(CRASH, 'wrong').info['2d'].crashScreen, false, 'Reality.exe never shows it');
+  for (const reducedFlash of [false, true]) {
+    for (const reason of ['wall', 'self']) {
+      const { fn } = mkPrefs({ reducedFlash });
+      const d = createDirector({ universes: CRASH, seed: 6, prefs: fn });
+      d.onShift({ from: 'lcd', to: 'desktop', index: 1 }, open(3), 0);
+      d.update(open(3), 4000); // the arrival's own veil has faded
+      assert.equal(d.get().veil, null);
+      d.onLifeLost({ lives: 2, death: { reason } }, crashSnap(reason, { waiting: 'respawn' }), 5000);
+      let g = d.get();
+      assert.equal(g.phrase, null, `${reason}: no LIFE LOST card`);
+      assert.equal(g.strobe, null);
+      assert.ok(!Number.isFinite(g.invertUntil), 'no inversion');
+      assert.equal(g.veil, null, 'no reduced-flash veil');
+      assert.equal(g.crash, true);
+      assert.equal(g.crashAt, 5000);
+      d.update(crashSnap(reason, { waiting: 'respawn' }), 5050);
+      assert.equal(d.get().veil, null);
+      d.onLifeLost({ lives: 1, death: { reason } }, crashSnap(reason, { waiting: 'respawn' }), 8000);
+      assert.equal(d.get().phrase, null, 'no LAST LIFE card');
+      d.onDeath(crashSnap(reason, { alive: false, lives: 0 }), 12000);
+      g = d.get();
+      assert.equal(g.strobe, null);
+      assert.ok(!Number.isFinite(g.invertUntil));
+      assert.equal(g.crash, true);
+      assert.equal(g.crashAt, 12000);
+    }
+  }
+});
+
+test('crash screen: a board-full ending in Desktop keeps today\'s impact', () => {
+  const d = inDesktop(CRASH);
+  d.onDeath(crashSnap('complete', { alive: false }), 9000);
+  const g = d.get();
+  assert.equal(g.crash, false);
+  assert.ok(g.strobe && Number.isFinite(g.invertUntil));
+});
+
+test('crash screen: the looks picked after a Desktop crash are the same as without it', () => {
+  const run = (universes) => {
+    const d = inDesktop(universes);
+    d.onLifeLost({ lives: 2, death: { reason: 'wall' } }, crashSnap('wall', { waiting: 'respawn' }), 2000);
+    const out = [];
+    const ids = ['hangar', 'court', 'mushroom', 'castle', 'lane', 'acid', 'disco', 'kombat', 'abyss', 'plastic', 'desktop', 'bunker'];
+    let at = 3000, from = 'desktop';
+    for (let i = 0; i < 60; i++) {
+      const to = ids[i % ids.length];
+      const c = d.onShift({ from, to, index: i + 3 }, open(10 + i, { universe: { id: to } }), at);
+      const g = d.get();
+      out.push([c.look, g.phrase && g.phrase.text, g.phrase && g.phrase.seed, g.strobe && g.strobe.count]);
+      from = to; at += 900;
+    }
+    return out;
+  };
+  assert.deepEqual(run(CRASH), run(ALL));
+});
+
+test('crash screen: a crash in another universe still gets its phrase and strobe', () => {
+  const d = createDirector({ universes: CRASH, seed: 6 });
+  d.onShift({ from: 'lcd', to: 'arcade', index: 1 }, open(3), 0);
+  d.onLifeLost({ lives: 2, death: { reason: 'wall' } }, open(9, { universe: { id: 'arcade' }, death: { reason: 'wall' }, waiting: 'respawn' }), 1000);
+  let g = d.get();
+  assert.equal(g.phrase.text, 'LIFE LOST');
+  assert.ok(g.strobe && Number.isFinite(g.invertUntil));
+  assert.equal(g.crash, false);
+  d.onShift({ from: 'arcade', to: 'wrong', index: 2 }, open(4), 2000);
+  d.onLifeLost({ lives: 1, death: { reason: 'self' } }, open(9, { universe: { id: 'wrong' }, death: { reason: 'self' }, waiting: 'respawn' }), 4000);
+  g = d.get();
+  assert.equal(g.phrase.text, 'LAST LIFE');
+  assert.ok(g.strobe);
+  d.onDeath(open(9, { universe: { id: 'wrong' }, death: { reason: 'self' }, alive: false }), 6000);
+  assert.ok(d.get().strobe);
+});
+
+test('crash screen: fx carries the crash age', () => {
+  const d = createDirector({ universes: CRASH, seed: 6 });
+  d.onShift({ from: 'lcd', to: 'desktop', index: 1 }, open(3), 0);
+  const fxer = createFx();
+  const frame = (now) => fxer.frame({ now, director: d.get(), beat: null, prefs: { reducedFlash: false, reducedMotion: false }, snap: crashSnap('wall') });
+  assert.equal(frame(100).crashAge, Infinity);
+  d.onLifeLost({ lives: 2, death: { reason: 'wall' } }, crashSnap('wall', { waiting: 'respawn' }), 1000);
+  assert.equal(frame(1150).crashAge, 150);
+});
