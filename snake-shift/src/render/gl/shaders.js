@@ -85,7 +85,10 @@ varying vec3 vDir;
 void main() {
   vec3 d = normalize(vDir);
   gDist = 10000.0;
+#ifndef SKY_FULL
+  // castle-room: a room whose glsl.sky contains '#define SKY_FULL' gets the real sky below the horizon (no floor)
   d.y = abs(d.y);  // below the horizon the sky pass shows the mirror image (seen through the glossy floor)
+#endif
   gl_FragColor = vec4(roomSky(d), 1.0);
 }`;
 }
@@ -236,6 +239,7 @@ export function glowFS() {
 uniform vec3 uColor;
 uniform vec4 uGlow;     // x mode (0 blob, 1 ring, 2 energy wall, 3 beam, 4 laser, 5 smoke), y intensity, z/w mode params
 uniform float uGTime;
+uniform float uGCalm;   // 1 while fx.calm (castle-room, for the Abyss request): beam ripple slows down
 varying vec2 vUV;
 float gHash(vec2 p) {
   vec3 p3 = fract(vec3(p.xyx) * 0.1031);
@@ -270,7 +274,9 @@ void main() {
   } else if (m < 3.5) {
     float x = abs(vUV.x - 0.5) * 2.0;
     float y = vUV.y;
-    a = (exp(-x * x * 9.0) * 0.7 + exp(-x * x * 140.0)) * pow(1.0 - y, 1.4) * (0.75 + 0.25 * sin(y * 36.0 - uGTime * 12.0));
+    float rip = 0.75 + 0.25 * sin(y * 36.0 - uGTime * 12.0);
+    rip = mix(rip, 0.9 + 0.1 * sin(y * 7.0 - uGTime * 1.2), uGCalm); // calm (fx.calm): slow, shallow ripple
+    a = (exp(-x * x * 9.0) * 0.7 + exp(-x * x * 140.0)) * pow(1.0 - y, 1.4) * rip;
   } else if (m < 4.5) {
     // 4 laser line (d.beam): hard core across vUV.x, z = halo amount
     float x = abs(vUV.x - 0.5) * 2.0;

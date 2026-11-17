@@ -426,6 +426,16 @@ export function createSim({ universes = UNIVERSES, speed = SPEED, seed = 1, star
 
   // ------------------------------------------------------------ snapshot
 
+  /** Board-local mushroom with its remaining ticks (`ttl`, mushroom stream request), or null. */
+  function boardMushroom() {
+    const b = mush ? toBoard(space, mush.cell) : null;
+    if (!b) return null;
+    // Non-enumerable, so the cell still compares equal to { x, y } from tick to tick.
+    const m = { x: b.x, y: b.y };
+    Object.defineProperty(m, 'ttl', { value: Math.max(0, MUSHROOM.lifetimeTicks - (tick - mush.born)), enumerable: false });
+    return Object.freeze(m);
+  }
+
   function build() {
     const snake = [], idx = [];
     for (let i = 0; i < body.length; i++) {
@@ -445,7 +455,7 @@ export function createSim({ universes = UNIVERSES, speed = SPEED, seed = 1, star
       breaks: Object.freeze(breaks),
       prevTail: prevTail && prevTail !== OFF ? toBoard(space, prevTail) : null,
       food: food ? toBoard(space, food) : null,
-      mushroom: mush ? toBoard(space, mush.cell) : null,
+      mushroom: boardMushroom(),
       universe: Object.freeze({ id: fu.id, rules: fu.universe.rules, mushrooms: fu.universe.mushrooms, index: fu.index, holdLeft: fu.holdLeft }),
       space: Object.freeze(spaceSnap),
       body: space.kind === 'box' ? null : Object.freeze(body.filter((c) => c !== OFF)),

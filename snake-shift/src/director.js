@@ -1,46 +1,95 @@
-// Director: decides which scene shows, how hard a cut hits, and when the
-// first-person view runs. Pure: no DOM, own seeded generator. It reads
-// snapshots and never touches the simulation.
+// Director (LEVELS_PLAN 4.1): the simulation picks the universe; the director picks only the
+// look (2d, 3d or pov) of each arrival, at random, and how hard the cut hits. Pure: no DOM,
+// own seeded generator (presentation only, so it never changes a run). It listens to the
+// simulation's `shift`, held `ate`, `lifeLost` and `died` events through main.js.
 
 import { createRng } from './rng.js';
-import { DIRECTOR as D, LUMA, OPENING, PHRASES, RARE } from './config.js';
+import { DIRECTOR as D, LUMA, PHRASES, CALM, NO_POV, OLD_ROOMS } from './config.js';
+import { UNIVERSES } from './rules-config.js';
 import { DIRS } from './sim.js';
 
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
+const LOOK_ORDER = ['2d', '3d', 'pov'];
 
-/**
- * Build the scene table from whatever loaded.
- * flats: { [id]: meta } for flat timelines; rooms: { [id]: meta } from the 3D engine.
- */
-export function buildScenes({ flats = {}, rooms = {} } = {}) {
-  const list = [];
-  const base = (id, meta, kind) => ({
-    timeline: id,
-    kind,
-    name: meta.name || id.toUpperCase(),
-    year: meta.year != null ? String(meta.year) : '',
-    clock: meta.clock ? String(meta.clock) : '',
-    luma: typeof meta.luma === 'number' ? meta.luma : (LUMA[id] ?? 0.4),
-    veil: meta.veil || '#000000',
-    hud: meta.hud || null,
-    rare: RARE.includes(id),
-  });
-  for (const [id, meta] of Object.entries(flats)) {
-    list.push({ id, view: 'board', weight: meta.weight ?? 1, ...base(id, meta || {}, '2d') });
-  }
-  for (const [id, meta0] of Object.entries(rooms)) {
-    const meta = meta0 || {};
-    const w = meta.weight ?? 2;
-    list.push({ id, view: 'board', weight: w, ...base(id, meta, '3d') });
-    const views = Array.isArray(meta.views) ? meta.views : ['board', 'pov'];
-    if (views.includes('pov')) {
-      list.push({ id: `${id}-pov`, view: 'pov', weight: Math.max(0.4, w * D.povWeightFactor), ...base(id, meta, '3d') });
-    }
-  }
-  return list;
+/** Scene id of a look: the universe id for its main look, '<id>-3d' / '<id>-pov' otherwise. */
+export function sceneId(id, look, has2d) {
+  if (look === 'pov') return `${id}-pov`;
+  if (look === '3d' && has2d) return `${id}-3d`;
+  return id;
 }
 
-/** True when `n` cells straight ahead of the head are inside the grid and free of the body. */
+/**
+ * Build the universe table of LEVELS_PLAN 2.1 from what loaded.
+ *   flats:      { [id]: meta } of the flat timelines (2D looks) that loaded
+ *   rooms:      { [id]: meta } of the room modules that loaded (no WebGL needed)
+ *   glRooms:    engine.rooms ({ [id]: meta with views }) or null without WebGL
+ *   perspRooms: { [id]: meta } the 2D perspective stand-in can draw (no WebGL), or null
+ * A flat timeline and a room with the same id are one universe. A universe with no look is left
+ * out. Returns [{ id, rules, mushrooms, rare, room, weight, calm, looks, gl, persp, info }] in the
+ * order of rules-config UNIVERSES (unknown ids after them); `info[look]` is the scene info.
+ */
+export function buildUniverses({ flats = {}, rooms = {}, glRooms = null, perspRooms = null, base = UNIVERSES } = {}) {
+  const baseById = new Map(base.map((u) => [u.id, u]));
+  const ids = [...base.map((u) => u.id)];
+  for (const id of [...Object.keys(flats), ...Object.keys(rooms), ...Object.keys(glRooms || {})]) {
+    if (!ids.includes(id)) ids.push(id);
+  }
+  const out = [];
+  for (const id of ids) {
+    const flat = flats[id] || null;
+    const roomMeta = rooms[id] || (glRooms && glRooms[id]) || (perspRooms && perspRooms[id]) || null;
+    const gl = !!(glRooms && glRooms[id]);
+    const persp = !gl && !!(perspRooms && perspRooms[id]) && OLD_ROOMS.includes(id);
+    const looks = [];
+    if (flat) looks.push('2d');
+    if (gl || persp) looks.push('3d');
+    const views = gl && Array.isArray(glRooms[id].views) ? glRooms[id].views : ['board'];
+    if (gl && views.includes('pov') && !NO_POV.includes(id)) looks.push('pov');
+    if (!looks.length) continue;
+    const b = baseById.get(id) || {};
+    const anyMeta = roomMeta || flat || {};
+    const calm = CALM.includes(id) || !!(anyMeta.calm || (flat && flat.calm));
+    const info = {};
+    for (const look of looks) {
+      const meta = (look === '2d' ? flat : roomMeta) || anyMeta;
+      info[look] = Object.freeze({
+        id: sceneId(id, look, !!flat),
+        timeline: id,
+        universe: id,
+        look,
+        kind: look === '2d' ? '2d' : '3d',
+        view: look === 'pov' ? 'pov' : 'board',
+        name: meta.name || id.toUpperCase(),
+        year: meta.year != null ? String(meta.year) : '',
+        clock: meta.clock ? String(meta.clock) : '',
+        luma: typeof meta.luma === 'number' ? meta.luma : (LUMA[id] ?? 0.4),
+        veil: meta.veil || '#000000',
+        hud: meta.hud || null,
+        rare: !!b.rare,
+        calm,
+      });
+    }
+    const weight = (roomMeta && roomMeta.weight) || (flat && flat.weight) || b.weight || 1;
+    out.push(Object.freeze({
+      id,
+      rules: b.rules || anyMeta.rules || 'box',
+      mushrooms: !!(b.mushrooms ?? anyMeta.mushrooms),
+      rare: !!b.rare,
+      // From the plan's table, not from WebGL, so a seed gives the same run on every device.
+      room: b.room != null ? !!b.room : !!roomMeta,
+      weight,
+      calm, looks: Object.freeze(looks), gl, persp, info: Object.freeze(info),
+    }));
+  }
+  return out;
+}
+
+/** The table createSim takes (LEVELS_PLAN 3.2). */
+export function simUniverses(list) {
+  return list.map(({ id, rules, mushrooms, rare, room, weight }) => ({ id, rules, mushrooms, rare, room, weight }));
+}
+
+/** True when `n` cells straight ahead of the head are on the board and free of the body. */
 export function clearAhead(snap, n = D.povClearCells) {
   if (!snap || !snap.snake || !snap.snake.length) return false;
   const d = DIRS[snap.dir];
@@ -55,238 +104,332 @@ export function clearAhead(snap, n = D.povClearCells) {
 }
 
 /**
- * createDirector({ scenes, seed, prefs, hasGL, script, first })
- *   prefs: () => ({ reducedFlash, reducedMotion })
- *   hasGL: () => boolean (WebGL present and not lost)
+ * createDirector({ universes, seed, prefs, hasGL, first, phrases })
+ *   universes: buildUniverses() result
+ *   prefs: () => ({ reducedFlash, reducedMotion }); hasGL: () => WebGL present and not lost
+ * Inputs (main.js calls these from the simulation's events, `now` in ms):
+ *   reset(now, snap)  onShift(e, snap, now)  onAte(e, snap, now)  onLifeLost(e, snap, now)
+ *   onDeath(snap, now)  update(snap, now)  resumed(now)
+ * onShift / onAte / onLifeLost / update return a cut { from, to, look, prevLook, swing, impact,
+ * held, reset } when the look or universe changed, else null. get() is the read-only view `d`.
  */
 export function createDirector({
-  scenes = [],
+  universes = [],
   seed = 7,
   prefs = () => ({ reducedFlash: false, reducedMotion: false }),
   hasGL = () => true,
-  script = OPENING,
   first = 'lcd',
   phrases = PHRASES,
 } = {}) {
   const rng = createRng(seed);
-  const byId = new Map(scenes.map((s) => [s.id, s]));
-  const disabled = new Set();
-  let st;
+  const byId = new Map(universes.map((u) => [u.id, u]));
+  const disabled = new Set(); // '<id>:<look>'
+  let lookLock = null;        // debug: ?look=
+  let st = null;
 
-  function firstScene() {
-    if (byId.has(first)) return first;
-    const flat = scenes.find((s) => s.kind === '2d');
-    return (flat || scenes[0] || { id: first }).id;
+  const home = () => (byId.has(first) ? first : (universes[0] ? universes[0].id : first));
+
+  function usable(u, look) {
+    if (!u || !u.looks.includes(look) || disabled.has(`${u.id}:${look}`)) return false;
+    if (look === '2d') return true;
+    if (look === '3d') return (u.gl && hasGL()) || u.persp;
+    return u.gl && hasGL(); // pov
   }
 
-  function reset(now = 0) {
-    const id = firstScene();
+  function povGate(snap, p) {
+    if (p.reducedMotion) return false;
+    if (!snap || !snap.alive || snap.waiting) return false;
+    if ((snap.score | 0) < D.povMinScore) return false;
+    return clearAhead(snap);
+  }
+
+  /** Room look by today's weighting: first person about 0.45 of the board view, when allowed. */
+  function roomLook(u, snap, p) {
+    const has3d = usable(u, '3d');
+    const pov = usable(u, 'pov') && povGate(snap, p);
+    if (pov && (!has3d || rng.next() < D.povWeightFactor / (1 + D.povWeightFactor))) return 'pov';
+    return has3d ? '3d' : null;
+  }
+
+  /** Look on arrival (4.1). */
+  function arrivalLook(u, snap, p) {
+    if (lookLock && usable(u, lookLock) && !(lookLock === 'pov' && p.reducedMotion)) return lookLock;
+    const can2d = usable(u, '2d');
+    const room = usable(u, '3d') || usable(u, 'pov');
+    if (can2d && !room) return '2d';
+    if (!can2d) return roomLook(u, snap, p) || u.looks[0];
+    // A universe with both looks: 2D 40% of the time, else a room look. The four built rooms
+    // have no 2D look and never reach here.
+    if (rng.next() < D.flatChance) return '2d';
+    return roomLook(u, snap, p) || '2d';
+  }
+
+  /** A held bite flips to a different look of the same universe (castle: 2d <-> 3d). */
+  function flipLook(u, snap, p) {
+    if (lookLock && usable(u, lookLock)) return lookLock;
+    const cands = [];
+    for (const look of LOOK_ORDER) {
+      if (look === st.look || !usable(u, look)) continue;
+      if (look === 'pov' && !povGate(snap, p)) continue;
+      cands.push(look);
+    }
+    if (!cands.length) return st.look;
+    const w = (l) => (l === 'pov' ? D.povWeightFactor : 1);
+    let r = rng.next() * cands.reduce((s, l) => s + w(l), 0);
+    for (const l of cands) { r -= w(l); if (r <= 0) return l; }
+    return cands[cands.length - 1];
+  }
+
+  /** Board look of the current universe (never pov). */
+  function boardLook(u) {
+    if (st.look !== 'pov' && usable(u, st.look)) return st.look;
+    if (usable(u, '3d')) return '3d';
+    if (usable(u, '2d')) return '2d';
+    return null;
+  }
+
+  const infoOf = (uid, look) => {
+    const u = byId.get(uid);
+    return (u && u.info[look]) || null;
+  };
+  const curInfo = () => infoOf(st.universe, st.look) || fallbackInfo();
+  function fallbackInfo() {
+    const h = byId.get(home());
+    return (h && (h.info['2d'] || h.info[h.looks[0]])) || null;
+  }
+
+  const sceneById = new Map();
+  for (const u of universes) for (const look of u.looks) sceneById.set(u.info[look].id, u.info[look]);
+  const special = (u) => !!u && (u.rules !== 'box' || u.mushrooms);
+
+  function reset(now = 0, snap = null) {
+    const uid = snap && snap.universe && byId.has(snap.universe.id) ? snap.universe.id : home();
+    const u = byId.get(uid);
+    const locked = st ? st.locked : false;
     st = {
-      scene: id, showing: id, prev: id,
-      cutAt: now, lastCutAt: -Infinity, lastSwingAt: -Infinity,
-      cutCount: 0, scriptIndex: 0, visited: new Set([byId.get(id)?.timeline]),
-      chaos: 0, score: 0, variant: 0, bite: null, biteAt: -Infinity,
-      invertUntil: -Infinity, strobe: null, phrase: null, veil: null,
-      dead: false, locked: st ? st.locked : false, lastCut: null,
-      holdLeft: 0, recent: [], resets: 0,
+      universe: uid, look: '2d', scene: uid, showing: uid, prev: uid, prevTimeline: uid, prevUntil: -Infinity,
+      cutAt: now, lastCutAt: -Infinity, cutCount: 0, povAt: -Infinity,
+      visited: new Set([uid]), roomVisited: new Set(),
+      chaos: 0, score: snap ? snap.score | 0 : 0, variant: 0, bite: null, biteAt: -Infinity,
+      invertUntil: -Infinity, strobe: null, phrase: null, veil: null, veilState: null,
+      dead: false, locked, lastCut: null, resets: 0,
     };
-  }
-
-  const cur = () => byId.get(st.scene);
-
-  function usable(s) {
-    if (!s || disabled.has(s.id)) return false;
-    if (s.kind === '3d' && !hasGL()) return false;
-    return true;
-  }
-
-  function allowed(id, snap, now, p) {
-    const s = byId.get(id);
-    if (!usable(s) || id === st.scene) return false;
-    if (s.view === 'pov') {
-      if (p.reducedMotion) return false;
-      if (!snap || !snap.alive || !clearAhead(snap)) return false;
+    st.chaos = clamp01(st.score / D.chaosScore);
+    if (u) {
+      st.look = arrivalLook(u, snap, prefs());
+      if (st.look !== '2d') st.roomVisited.add(uid);
+      st.scene = st.showing = st.prev = u.info[st.look].id;
     }
-    if (p.reducedFlash && now - st.lastSwingAt < D.swingGapMs) {
-      const c = cur();
-      if (c && Math.abs(s.luma - c.luma) > D.swingLuma) return false;
-    }
-    return true;
   }
 
-  const opening = () => st.scriptIndex < script.length;
-
-  /** Pick weight: rare scenes stay rare; recently shown timelines sink, unseen ones rise. */
-  function weightOf(s) {
-    let w = s.rare ? D.rareWeight * (0.5 + st.chaos) : Math.max(0.01, s.weight);
-    if (st.recent.includes(s.timeline)) w *= D.recentFactor;
-    else if (!s.rare && !st.visited.has(s.timeline)) w *= D.freshFactor;
-    return w;
+  /** Reduced flash: a veil that fades in 450 ms, and stays partly up while shifts come fast. */
+  function startVeil(color, now) {
+    const gap = now - st.lastCutAt;
+    const vs = st.veilState;
+    const rapid = gap < D.veilGapMs;
+    st.veilState = {
+      color: rapid && vs ? vs.color : color,
+      t0: now,
+      peak: D.veilFrom,
+      hold: rapid ? D.veilHold : 0,
+    };
+    st.veil = { color: st.veilState.color, at: now, dur: D.veilMs, from: D.veilFrom };
   }
 
-  function pickRandom(snap, now, p) {
-    const all = scenes.filter((s) => allowed(s.id, snap, now, p));
-    if (!all.length) return null;
-    // Rare scenes: never in the opening, never early, never straight after another rare one.
-    const c = cur();
-    const noRare = opening() || st.score < D.rareMinScore || (c && c.rare);
-    const strict = noRare ? all.filter((s) => !s.rare) : all;
-    const pool = strict.length ? strict : all;
-    let total = 0;
-    for (const s of pool) total += weightOf(s);
-    let r = rng.next() * total;
-    for (const s of pool) {
-      r -= weightOf(s);
-      if (r <= 0) return s.id;
-    }
-    return pool[pool.length - 1].id;
+  function veilAlpha(now) {
+    const v = st.veilState;
+    if (!v) return 0;
+    const t = now - v.t0;
+    if (t < 0) return v.peak;
+    const fade = v.peak * (1 - t / D.veilMs);
+    const floor = v.hold * clamp01(1 - t / D.veilGapMs);
+    return Math.max(0, fade, floor);
   }
 
-  function pickNext(snap, now, p) {
-    while (st.scriptIndex < script.length) {
-      const id = script[st.scriptIndex];
-      const s = byId.get(id);
-      const skip = !usable(s) || id === st.scene || (s.view === 'pov' && p.reducedMotion);
-      if (skip) { st.scriptIndex++; continue; }
-      if (allowed(id, snap, now, p)) { st.scriptIndex++; return id; }
-      // Blocked first person or a swing held back by the limiter: keep it for the next bite.
-      return pickRandom(snap, now, p);
-    }
-    return pickRandom(snap, now, p);
-  }
-
-  function cut(id, now, { impact = false, big = false, totalReset = false } = {}) {
-    const from = cur();
-    const to = byId.get(id);
-    if (!to) return null;
+  function cut(uid, look, now, { impact = false, held = false, totalReset = false, big = false } = {}) {
+    const fromInfo = curInfo();
+    const toInfo = infoOf(uid, look) || fallbackInfo();
+    if (!toInfo) return null;
     const p = prefs();
     const wild = !p.reducedFlash;
-    const swing = !!from && Math.abs(to.luma - from.luma) > D.swingLuma;
+    const swing = !!fromInfo && Math.abs(toInfo.luma - fromInfo.luma) > D.swingLuma;
+    const fromUid = st.universe, prevLook = st.look;
     st.prev = st.scene;
-    st.scene = id;
-    st.lastCutAt = now;
+    if (uid !== st.universe) st.prevTimeline = st.universe;
+    st.universe = uid;
+    st.look = look;
+    st.scene = toInfo.id;
     st.cutCount += 1;
-    if (swing) st.lastSwingAt = now;
 
     let showAt = now;
     st.invertUntil = -Infinity;
     st.strobe = null;
-    st.veil = null;
-    if (wild && impact) {
+    st.prevUntil = -Infinity;
+    if (!wild) startVeil((fromInfo && fromInfo.veil) || '#000000', now);
+    st.lastCutAt = now;
+    // Calm universes never flash: no inversion into them; leaving one inverts the new scene.
+    const calmTo = !!toInfo.calm, calmFrom = !!(fromInfo && fromInfo.calm);
+    if (wild && impact && !calmTo) {
       const inv = D.invertMinMs + rng.next() * (D.invertMaxMs - D.invertMinMs);
       st.invertUntil = now + inv;
-      showAt = now + inv;
+      if (!calmFrom) { showAt = now + inv; st.prevUntil = showAt; }
     }
-    if (!wild && swing) {
-      st.veil = { color: from.veil, at: now, dur: D.veilMs, from: D.veilFrom };
-    }
-    const firstVisit = !st.visited.has(to.timeline);
-    const bigEvent = big || st.cutCount === 1 || (to.kind === '3d' && firstVisit) || to.view === 'pov';
-    if (wild && impact && (bigEvent || rng.next() < 0.08 + 0.5 * st.chaos)) {
+    const firstRoom = look !== '2d' && !st.roomVisited.has(uid);
+    const bigEvent = big || st.cutCount === 1 || firstRoom || look === 'pov';
+    if (wild && impact && !calmTo && (bigEvent || rng.next() < D.strobeBase + D.strobeChaos * st.chaos)) {
       const count = D.strobeMin + rng.int(D.strobeMax - D.strobeMin + 1);
       st.strobe = { at: showAt, count, dur: D.strobeWindowMs };
     }
 
     st.phrase = null;
-    if (impact && to.view !== 'pov' && to.id !== firstScene()) {
+    if (impact && look !== 'pov' && uid !== home()) {
       let text = null;
-      if (st.cutCount === 1) text = 'TIME BREAK!';
-      else if (to.kind === '3d' && firstVisit && to.year) text = `WELCOME TO ${to.year}`;
+      if (st.cutCount === 1 && !held) text = 'TIME BREAK!';
+      else if (firstRoom && toInfo.year) text = `WELCOME TO ${toInfo.year}`;
       else if (rng.next() < 0.3 + 0.5 * st.chaos) {
         const pool = phrases.filter((t) => t !== 'TIME BREAK!' || st.chaos > 0.3);
         text = rng.pick(pool.length ? pool : phrases);
       }
       if (text) st.phrase = { text, at: showAt, dur: D.phraseMs, seed: rng.int(1 << 30) };
     }
-    st.visited.add(to.timeline);
-    st.recent.push(to.timeline);
-    if (st.recent.length > D.recentLen) st.recent.shift();
-    // Rare scenes are held for one or two bites (one under reduced flash).
-    st.holdLeft = to.rare && wild ? rng.int(Math.max(1, D.rareHoldMax)) : 0;
+    st.visited.add(uid);
+    if (look !== '2d') st.roomVisited.add(uid);
+    if (look === 'pov') st.povAt = showAt;
     if (totalReset) st.resets += 1;
     st.cutAt = showAt;
-    st.lastCut = { from: from ? from.id : null, to: id, swing, impact, reset: totalReset, at: now };
-    st.showing = showAt > now ? st.prev : id;
+    st.showing = showAt > now ? st.prev : st.scene;
+    st.lastCut = Object.freeze({
+      from: fromUid, to: uid, look, prevLook, fromScene: st.prev, toScene: st.scene,
+      swing, impact, held, reset: totalReset, at: now,
+    });
     return st.lastCut;
   }
 
-  /** A dot was eaten. `snap` is taken right after the bite. Returns the cut, or null for local changes only. */
-  function onBite(snap, now) {
-    st.variant += 1;
-    st.score = snap ? snap.score : st.score + 1;
-    st.chaos = clamp01(st.score / D.chaosScore);
-    st.bite = snap && snap.snake && snap.snake[0] ? { x: snap.snake[0].x, y: snap.snake[0].y } : null;
-    st.biteAt = now;
-    if (st.locked) return null;
-    const p = prefs();
-    const c = cur();
-    // Reduced flash: the cut limiter is absolute, so bites in between are local changes only
-    // (a first-person passage then runs on until the next allowed cut or its timeout).
-    if (p.reducedFlash && now - st.lastCutAt < D.reducedCutGapMs) return null;
-    // A rare scene still being held: local changes only.
-    if (c && c.rare && st.holdLeft > 0) { st.holdLeft -= 1; return null; }
-    // Total Reset: after a room, timewarp or wrong, an occasional silent snap back to LCD.
-    if (!opening() && c && (c.kind === '3d' || c.rare)) {
-      const home = firstScene();
-      const h = byId.get(home);
-      if (h && h.kind === '2d' && allowed(home, snap, now, p) && rng.next() < D.resetBase + D.resetChaos * st.chaos) {
-        return cut(home, now, { totalReset: true });
-      }
-    }
-    const next = pickNext(snap, now, p);
-    if (!next) {
-      if (c && c.view === 'pov' && usable(byId.get(c.timeline))) return cut(c.timeline, now);
+  /** The simulation shifted (snapshot already shows the new universe). */
+  function onShift(e, snap, now) {
+    st.dead = false;
+    const u = byId.get(e.to);
+    if (!u) { // no look loaded for it (main never passes one): keep the current look
+      st.universe = e.to;
       return null;
     }
-    return cut(next, now, { impact: true });
+    const p = prefs();
+    let look;
+    if (e.reset && usable(u, '2d')) look = '2d';
+    else look = arrivalLook(u, snap, p);
+    return cut(u.id, look, now, { impact: !e.reset, totalReset: !!e.reset });
+  }
+
+  /**
+   * A food event. Every bite punches (fx.punch). A held bite inside a special universe (or a
+   * debug-locked one) cuts to a different look of the same universe with a shift's impact.
+   */
+  function onAte(e, snap, now) {
+    st.variant += 1;
+    st.score = e && Number.isFinite(e.score) ? e.score : st.score + 1;
+    st.chaos = clamp01(st.score / D.chaosScore);
+    const head = snap && snap.snake && snap.snake[0];
+    st.bite = e && e.cell ? { x: e.cell.x, y: e.cell.y } : head ? { x: head.x, y: head.y } : null;
+    st.biteAt = now;
+    if (!e || !e.held) return null; // the shift follows
+    const u = byId.get(st.universe);
+    if (!u || !(special(u) || st.locked)) return null; // held rare universe: local changes only, as built
+    return cut(u.id, flipLook(u, snap, prefs()), now, { impact: true, held: true });
+  }
+
+  /** A life was lost: impact, strobe burst, phrase; the board look is forced (never pov). */
+  function onLifeLost(e, snap, now) {
+    const u = byId.get(st.universe);
+    let res = null;
+    if (st.look === 'pov' && u) {
+      const bl = boardLook(u);
+      if (bl) res = cut(u.id, bl, now, { impact: false });
+    }
+    const p = prefs();
+    const info = curInfo();
+    st.invertUntil = -Infinity;
+    st.strobe = null;
+    st.prevUntil = -Infinity;
+    st.showing = st.scene;
+    if (!p.reducedFlash && !(info && info.calm)) {
+      st.invertUntil = now + D.lifeLostInvertMs;
+      st.strobe = { at: now + D.lifeLostInvertMs, count: D.strobeMin + 1, dur: D.strobeWindowMs };
+    } else if (p.reducedFlash) {
+      startVeil((info && info.veil) || '#000000', now);
+    }
+    const lives = e && Number.isFinite(e.lives) ? e.lives : 0;
+    st.phrase = { text: lives === 1 ? 'LAST LIFE' : 'LIFE LOST', at: now, dur: D.phraseMs * 1.4, seed: rng.int(1 << 30) };
+    st.biteAt = now;
+    return res;
   }
 
   function onDeath(snap, now) {
     st.dead = true;
     const p = prefs();
-    if (!p.reducedFlash && !st.locked) {
+    const info = curInfo();
+    if (!p.reducedFlash && !st.locked && !(info && info.calm)) {
       st.invertUntil = now + D.invertMaxMs;
       st.strobe = { at: now + D.invertMaxMs, count: D.strobeMin, dur: D.strobeWindowMs * 0.75 };
     }
   }
 
-  /** Per frame: first-person timeout, preference changes, lost WebGL, impact timing. */
+  /** Per frame: first-person timeout, preference changes, lost WebGL, impact timing, veil. */
   function update(snap, now) {
     const p = prefs();
-    const c = cur();
-    if (c && !usable(c)) {
-      const flat = scenes.find((s) => s.kind === '2d' && s.id === firstScene()) || scenes.find((s) => s.kind === '2d' && usable(s));
-      if (flat) cut(flat.id, now);
-    } else if (c && c.view === 'pov' && !st.locked) {
-      if (p.reducedMotion || (!st.dead && now - st.cutAt >= D.povTimeoutMs)) {
-        if (usable(byId.get(c.timeline))) cut(c.timeline, now);
+    const u = byId.get(st.universe);
+    let res = null;
+    if (u && !usable(u, st.look)) {
+      const alt = ['3d', '2d'].find((l) => l !== st.look && usable(u, l));
+      if (alt) res = cut(u.id, alt, now);
+      else if (st.look !== '2d') { st.look = '2d'; st.scene = st.showing = (fallbackInfo() || { id: home() }).id; }
+    } else if (u && st.look === 'pov' && lookLock !== 'pov') {
+      const waiting = !!(snap && snap.waiting);
+      if (p.reducedMotion || waiting || (!st.dead && now - st.povAt >= D.povTimeoutMs)) {
+        const bl = boardLook(u);
+        if (bl) res = cut(u.id, bl, now);
       }
     }
-    if (p.reducedFlash) { st.invertUntil = -Infinity; st.strobe = null; }
-    st.showing = now < st.invertUntil ? st.prev : st.scene;
+    if (p.reducedFlash) {
+      st.invertUntil = -Infinity;
+      st.strobe = null;
+      st.prevUntil = -Infinity;
+      const a = veilAlpha(now);
+      st.veil = a > 0.002 ? { color: st.veilState.color, at: now, dur: 1e9, from: a } : null;
+      if (!st.veil) st.veilState = null;
+    } else {
+      st.veilState = null;
+      if (st.veil && now - st.veil.at >= st.veil.dur) st.veil = null;
+    }
+    st.showing = now < st.prevUntil ? st.prev : st.scene;
+    return res;
   }
 
-  /** Debug and tests: cut straight to a scene, bypassing the gates. */
-  function force(id, now, impact = true) {
-    if (!byId.has(id)) return null;
-    if (id === st.scene) return null;
-    return cut(id, now, { impact });
+  function disable(id, now = 0, kind = null) {
+    const u = byId.get(id);
+    if (!u) return;
+    for (const look of u.looks) {
+      if (!kind || (kind === '2d' ? look === '2d' : look !== '2d')) disabled.add(`${id}:${look}`);
+    }
+    if (st.universe === id) update(null, now);
   }
 
-  function disable(id, now = 0) {
-    for (const s of scenes) if (s.id === id || s.timeline === id) disabled.add(s.id);
-    if (disabled.has(st.scene)) update(null, now);
+  /** Debug: hold one look (?look=), or null to release. Cuts to it at once when it is usable. */
+  function setLook(look, now = 0) {
+    lookLock = look || null;
+    const u = byId.get(st.universe);
+    if (lookLock && u && usable(u, lookLock) && st.look !== lookLock) return cut(u.id, lookLock, now);
+    return null;
   }
 
-  /** Read-only view for main, renderers and UI. */
+  /** Read-only view `d` for main, renderers and UI (field names fixed by LEVELS_PLAN 8.2). */
   function get() {
-    const s = byId.get(st.showing) || byId.get(st.scene) || null;
-    const pv = byId.get(st.prev);
+    const info = sceneById.get(st.showing) || curInfo();
     return Object.freeze({
-      scene: st.scene, showing: st.showing, prev: st.prev, sceneInfo: s,
-      prevTimeline: pv ? pv.timeline : st.prev, holdLeft: st.holdLeft, resets: st.resets,
-      view: s ? s.view : 'board', kind: s ? s.kind : '2d', timeline: s ? s.timeline : st.showing,
-      cutAt: st.cutAt, lastCutAt: st.lastCutAt, lastSwingAt: st.lastSwingAt, cutCount: st.cutCount,
+      scene: st.scene, showing: info ? info.id : st.showing, prev: st.prev, sceneInfo: info,
+      prevTimeline: st.prevTimeline, resets: st.resets,
+      view: info ? info.view : 'board', kind: info ? info.kind : '2d', timeline: info ? info.timeline : st.universe,
+      look: info ? info.look : '2d', universe: st.universe, calm: !!(info && info.calm),
+      cutAt: st.cutAt, lastCutAt: st.lastCutAt, cutCount: st.cutCount,
       chaos: st.chaos, score: st.score, variant: st.variant, bite: st.bite, biteAt: st.biteAt,
       invertUntil: st.invertUntil, strobe: st.strobe, phrase: st.phrase, veil: st.veil,
       locked: st.locked, lastCut: st.lastCut,
@@ -296,9 +439,11 @@ export function createDirector({
   reset(0);
 
   return {
-    scenes,
-    reset, onBite, onDeath, update, force, disable, get,
+    universes,
+    reset, onShift, onAte, onLifeLost, onDeath, update, disable, setLook, get,
+    /** The simulation holds one universe (debug lock): every bite flips the look. */
     lock(on = true) { st.locked = !!on; },
-    has(id) { return byId.has(id) && usable(byId.get(id)); },
+    has(id, look) { const u = byId.get(id); return !!u && (look ? usable(u, look) : u.looks.some((l) => usable(u, l))); },
+    get lookLock() { return lookLock; },
   };
 }

@@ -1,6 +1,8 @@
 // SNAKE//SHIFT — Canvas 2D stand-in for the 3D rooms when WebGL is missing (plan §6.5, stream flat-c).
 //
-// NOT WIRED YET. How the next stream wires it (main.js / flat.js, when loadEngine() resolves to null):
+// Wired by flat.js (a room scene without live WebGL). Safe with LEVELS_PLAN 3.3 snapshots: every cell is
+// its own block (breaks never bridged), null food draws no gem, waiting === 'respawn' pulses gently.
+// Original wiring notes:
 //
 //   import { createPerspRenderer } from './render/persp.js';
 //   const persp = createPerspRenderer({ cols, rows });
@@ -244,9 +246,14 @@ function gem(ctx, cam, pal, f, wx, wz) {
   fillPoly(ctx, [bot, fr, rt], css(shade(pal.dot, 0.55)));
   ctx.restore();
 }
-function headDir(snap) {
+const okCell = (c) => !!c && Number.isFinite(X(c)) && Number.isFinite(Y(c));
+function breakSet(snap) {
+  return new Set(Array.isArray(snap && snap.breaks) ? snap.breaks : []);
+}
+function headDir(snap, breaks) {
   const s = snap.snake;
-  if (s && s.length > 1) {
+  // Across a break the next cell is not the neck: fall back to the heading.
+  if (s && s.length > 1 && !(breaks && breaks.has(0)) && okCell(s[0]) && okCell(s[1])) {
     const dx = X(s[0]) - X(s[1]), dy = Y(s[0]) - Y(s[1]);
     if (Math.abs(dx) + Math.abs(dy) === 1) return [dx, dy];
   }
@@ -271,27 +278,32 @@ export function createPerspRenderer({ cols, rows }) {
       ctx.save();
       backdrop(ctx, cam, pal, f, w, h);
       boardBase(ctx, cam, pal, f, cols, rows);
-      if (fx.bite) biteRing(ctx, cam, pal, f, fx, wxOf(X(fx.bite)), wzOf(Y(fx.bite)));
+      if (okCell(fx.bite)) biteRing(ctx, cam, pal, f, fx, wxOf(X(fx.bite)), wzOf(Y(fx.bite)));
       // Painter's order: far rows first; inside a row, outer cells before inner ones.
+      // Every cell is its own block (never joined), so breaks and gaps need no bridging.
       const items = [];
-      const sn = (snap && snap.snake) || [];
+      const sn = (snap && Array.isArray(snap.snake)) ? snap.snake : [];
       const dead = snap && snap.alive === false;
-      sn.forEach((c, i) => items.push({ x: X(c), y: Y(c), i }));
-      if (snap && snap.food) items.push({ x: X(snap.food), y: Y(snap.food), i: -1 });
+      const brk = breakSet(snap);
+      sn.forEach((c, i) => { if (okCell(c)) items.push({ x: X(c), y: Y(c), i }); });
+      if (snap && okCell(snap.food)) items.push({ x: X(snap.food), y: Y(snap.food), i: -1 });
       const cx = (cols - 1) / 2;
       items.sort((a, b) => a.y - b.y || Math.abs(b.x - cx) - Math.abs(a.x - cx));
-      const d = snap ? headDir(snap) : [1, 0];
+      const d = snap ? headDir(snap, brk) : [1, 0];
+      // Respawn wait: the short snake breathes gently (LEVELS_PLAN 4.4).
+      const pulse = snap && snap.waiting === 'respawn' && !f.rm ? 1 + 0.18 * (0.5 + 0.5 * Math.sin(num(fx.now, f.time * 1000) / 180)) : 1;
       for (const it of items) {
         const wx = wxOf(it.x), wz = wzOf(it.y);
         if (it.i === -1) { gem(ctx, cam, pal, f, wx, wz); continue; }
         if (it.i === 0) {
-          block(ctx, cam, wx, wz, 0.06, HEAD_H, dead ? pal.deadHead : pal.head);
-          if (dead) deadCross(ctx, cam, wx, wz, HEAD_H);
-          else chevron(ctx, cam, wx, wz, HEAD_H, d, shade(pal.head, 0.25));
-        } else if (it.i === sn.length - 1 && sn.length > 2) {
-          block(ctx, cam, wx, wz, 0.2, TAIL_H, dead ? pal.dead : pal.tail);
+          block(ctx, cam, wx, wz, 0.06, HEAD_H * pulse, dead ? pal.deadHead : pal.head);
+          if (dead) deadCross(ctx, cam, wx, wz, HEAD_H * pulse);
+          else chevron(ctx, cam, wx, wz, HEAD_H * pulse, d, shade(pal.head, 0.25));
+        } else if ((it.i === sn.length - 1 && sn.length > 2) || brk.has(it.i)) {
+          // The tail, and the last cell before a break, end their run as a low tail block.
+          block(ctx, cam, wx, wz, 0.2, TAIL_H * pulse, dead ? pal.dead : pal.tail);
         } else {
-          block(ctx, cam, wx, wz, 0.1, BODY_H, dead ? pal.dead : pal.body);
+          block(ctx, cam, wx, wz, 0.1, BODY_H * pulse, dead ? pal.dead : pal.body);
         }
       }
       ctx.restore();

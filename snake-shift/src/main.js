@@ -1,17 +1,18 @@
 // SNAKE//SHIFT entry: loop, wiring, debug switches.
 // One-way flow: input -> sim -> events -> director -> renderers/audio/UI.
+// The simulation picks the universe (and its rules); the director picks only the look.
 
 import { GRID, parseOptions } from './config.js';
 import { createSim } from './sim.js';
-import { createDirector, buildScenes } from './director.js';
+import { createDirector, buildUniverses, simUniverses } from './director.js';
 import { createFx, createQuality } from './fx.js';
 import { createPrefs } from './prefs.js';
 import { createInput, steerFor } from './input.js';
 import { createUI } from './ui.js';
-import { createAutopilot } from './autopilot.js';
+import { createAutopilot, chooseDir } from './autopilot.js';
 import { randomSeed, hashSeed } from './rng.js';
 import { createFlatRenderer } from './render/flat.js';
-import { loadTimelines, loadEngine, loadSound, loadPersp } from './render/registry.js';
+import { loadTimelines, loadRoomModules, loadEngine, loadSound, loadPersp } from './render/registry.js';
 
 const opts = parseOptions(location.search);
 const $ = (id) => document.getElementById(id);
@@ -21,8 +22,8 @@ const flatCanvas = $('flat');
 const invertEl = $('invert');
 
 const prefs = createPrefs();
-let mode = 'loading'; // loading | title | ready | playing | paused | over
-let settingsFromReady = false; // settings opened before the first move: resume returns to ready
+let mode = 'loading'; // loading | title | ready | playing | paused | respawn | over
+let pausedFrom = null; // settings opened while waiting ('ready' or 'respawn'): resume returns there
 // Touch devices get swipe hints from the start; any touch anywhere (PLAY included) confirms it.
 let touchSeen = (() => { try { return matchMedia('(pointer: coarse)').matches; } catch { return false; } })();
 
@@ -37,12 +38,13 @@ const ui = createUI({
   onSettings: () => {
     if (mode === 'playing') togglePause();
     else if (mode === 'paused') ui.showPaused(true);
-    else if (mode === 'ready') { settingsFromReady = true; mode = 'paused'; ui.showPaused(true); } // before the first move
+    else if (mode === 'ready' || mode === 'respawn') { pausedFrom = mode; mode = 'paused'; ui.showPaused(true); }
   },
 });
 
-const [timelines, engine, sound] = await Promise.all([
+const [timelines, roomMods, engine, sound] = await Promise.all([
   loadTimelines(),
+  loadRoomModules(),
   opts.nogl ? Promise.resolve(null) : loadEngine(glCanvas, { cols: GRID.cols, rows: GRID.rows }),
   loadSound(() => prefs.get()),
 ]);
@@ -53,74 +55,156 @@ if (!timelines.lcd) {
   throw new Error('lcd timeline missing');
 }
 
-const flatMetas = Object.fromEntries(Object.entries(timelines).map(([id, m]) => [id, m.meta]));
+const metas = (mods) => Object.fromEntries(Object.entries(mods).map(([id, m]) => [id, m.meta]));
 const hasGL = () => !!engine && !(typeof engine.lost === 'function' && engine.lost());
-// Without WebGL, rooms come back as a Canvas 2D perspective stand-in (board view only).
-const fallback = engine ? null : await loadPersp({ cols: GRID.cols, rows: GRID.rows });
+// Without WebGL, the four built rooms come back as a Canvas 2D perspective stand-in (board view
+// only) and the new universes show only their 2D look.
+const fallback = engine ? null : await loadPersp({ cols: GRID.cols, rows: GRID.rows }, roomMods);
 const persp = fallback ? fallback.persp : null;
-const scenes = buildScenes({ flats: flatMetas, rooms: engine ? engine.rooms : (fallback ? fallback.rooms : {}) });
+const universes = buildUniverses({
+  flats: metas(timelines),
+  rooms: metas(roomMods),
+  glRooms: engine ? engine.rooms : null,
+  perspRooms: fallback ? fallback.rooms : null,
+});
+const uById = new Map(universes.map((u) => [u.id, u]));
 const director = createDirector({
-  scenes,
+  universes,
   seed: opts.seed !== null ? hashSeed(opts.seed) ^ 0x5bd1e995 : randomSeed(),
   prefs: () => prefs.get(),
-  hasGL: () => hasGL() || !!persp,
+  hasGL,
 });
-const sim = createSim({ cols: GRID.cols, rows: GRID.rows, speed: opts.speed, seed: nextSeed() });
+const start = {};
+if (opts.score !== null) start.score = opts.score;
+if (opts.lives !== null) start.lives = opts.lives;
+if (opts.universe && uById.has(opts.universe)) start.universe = opts.universe;
+const sim = createSim({ universes: simUniverses(universes), speed: opts.speed, seed: nextSeed(), start });
 const fxer = createFx();
 const flat = createFlatRenderer({
   canvas: flatCanvas, invertEl, cols: GRID.cols, rows: GRID.rows,
-  onBroken: (id) => { console.warn(`[main] disabling timeline '${id}'`); director.disable(id, performance.now()); },
+  onBroken: (id) => {
+    if (id === 'lcd') return; // the last resort stays
+    const kind = director.get().kind === '2d' ? '2d' : '3d';
+    console.warn(`[main] disabling the ${kind} look of '${id}'`);
+    director.disable(id, frameNow, kind);
+  },
 });
 const autopilot = opts.auto ? createAutopilot(sim) : null;
 
-if (opts.debug) console.info(`[snake-shift] scenes: ${scenes.map((s) => s.id).join(', ')}${engine ? '' : persp ? ' (rooms in 2D perspective)' : ' (no rooms)'}; audio ${audio.stub ? 'stub' : 'loaded'}`);
+/** The current universe's life() icon: from the look on screen first, then the other module. */
+function lifeIconFor(d) {
+  const id = d.timeline;
+  const t = timelines[id] && typeof timelines[id].life === 'function' ? timelines[id].life : null;
+  const r = roomMods[id] && typeof roomMods[id].life === 'function' ? roomMods[id].life : null;
+  return d.kind === '2d' ? (t || r) : (r || t);
+}
 
-// ---------- sim events -> director, audio, UI ----------
+if (opts.debug) {
+  const desc = universes.map((u) => `${u.id}[${u.looks.join('/')}]`).join(', ');
+  console.info(`[snake-shift] universes: ${desc}${engine ? '' : persp ? ' (rooms in 2D perspective)' : ' (no rooms)'}; audio ${audio.stub ? 'stub' : 'loaded'}`);
+}
+
+// ---------- sim events -> director, audio, UI (audio order: notes/audio.md) ----------
 let frameNow = performance.now();
 let overTimer = 0;
+let respawnAt = -Infinity;
+let pendingBite = null; // an `ate` whose shift (if any) has not come yet
+const cutLog = [];
+const eventLog = [];
 
-function applyLock() {
-  if (opts.scene && director.has(opts.scene)) {
-    director.force(opts.scene, frameNow, false);
-    if (opts.lock) director.lock(true);
-  }
+function logCut(cut, score, kind) {
+  if (!cut) return;
+  cutLog.push({ at: Math.round(frameNow), from: cut.from, to: cut.to, look: cut.look, held: cut.held, swing: cut.swing, reset: !!cut.reset, score, kind });
+  if (cutLog.length > 500) cutLog.shift();
+}
+function logEvent(type, e) {
+  if (!opts.debug) return;
+  eventLog.push({ type, at: Math.round(frameNow), ...e });
+  if (eventLog.length > 500) eventLog.shift();
 }
 
 sim.on('reset', () => {
-  director.reset(frameNow);
-  applyLock();
-  ui.setScore(0, false);
+  const snap = sim.snapshot();
+  director.reset(frameNow, snap);
+  pendingBite = null;
+  audio.setScore(snap.score);
+  audio.setLives(snap.lives);
+  ui.setScore(snap.score, false);
+  ui.setLives(snap.lives, snap.maxLives, null);
 });
 
-const sceneById = new Map(scenes.map((s) => [s.id, s]));
-
-sim.on('ate', ({ score }) => {
-  const snap = sim.snapshot();
-  const cut = director.onBite(snap, frameNow);
+/** Bite audio and HUD, once the universe and look of this bite are known. */
+function finishBite(e, cut) {
   const d = director.get();
-  // Audio order requested by the audio stream: chaos, timeline, cut, bite.
-  audio.setChaos(d.chaos);
-  if (cut) {
-    cutLog.push({ at: Math.round(frameNow), from: cut.from, to: cut.to, swing: cut.swing, reset: !!cut.reset, score });
-    if (cutLog.length > 500) cutLog.shift();
-    const target = sceneById.get(cut.to);
-    audio.setTimeline(target ? target.timeline : cut.to);
-    if (!cut.reset) audio.cut({ swing: cut.swing }); // Total Reset is a silent snap
+  const look = cut ? cut.look : (d.look || '2d');
+  const to = cut ? cut.to : d.universe;
+  const from = e.from || to;
+  audio.shift({ from, to, look, swing: !!(cut && cut.swing) });
+  audio.eat(e.score);
+  ui.setScore(e.score, true);
+}
+
+/** An `ate` that no `shift` followed (held bite, or nowhere to go): close it now. */
+function flushBite() {
+  if (!pendingBite) return;
+  const e = pendingBite;
+  pendingBite = null;
+  finishBite(e, e.cut || null);
+}
+
+sim.on('ate', (e) => {
+  flushBite();
+  const snap = sim.snapshot();
+  logEvent('ate', { kind: e.kind, score: e.score, held: e.held, lifeGained: e.lifeGained });
+  const cut = director.onAte(e, snap, frameNow);
+  logCut(cut, e.score, 'flip');
+  audio.setScore(e.score);
+  if (e.lifeGained) {
+    audio.setLives(snap.lives);
+    audio.lifeGained();
   }
-  if (score === 1 || !beat.running) {
-    audio.start(); // starts the beat clock and the rhythm
-    if (!beat.running) { try { beat.start(); } catch (e) { console.warn(e); } }
-  }
-  audio.eat(score);
-  ui.setScore(score, true);
+  if (e.lifeGained || e.kind === 'mushroom') ui.setLives(snap.lives, snap.maxLives, e.lifeGained ? 'gain' : null);
+  pendingBite = { score: e.score, from: snap.universe.id, cut };
+  if (e.held) flushBite();
 });
 
-sim.on('died', () => {
+sim.on('shift', (e) => {
   const snap = sim.snapshot();
+  logEvent('shift', { from: e.from, to: e.to, index: e.index, reset: !!e.reset });
+  const cut = director.onShift(e, snap, frameNow);
+  logCut(cut, snap.score, e.reset ? 'reset' : 'shift');
+  if (pendingBite) {
+    const b = pendingBite;
+    pendingBite = null;
+    finishBite({ ...b, from: e.from }, cut || { from: e.from, to: e.to, look: director.get().look, swing: false });
+  } else {
+    // Not a bite (debug lock): the kit follows the universe without a drop.
+    audio.shift({ from: e.from, to: e.to, look: cut ? cut.look : '2d', swing: false });
+  }
+});
+
+sim.on('lifeLost', (e) => {
+  flushBite();
+  const snap = sim.snapshot();
+  logEvent('lifeLost', { lives: e.lives, reason: e.death && e.death.reason });
+  director.onLifeLost(e, snap, frameNow);
+  audio.setLives(e.lives);
+  audio.lifeLost();
+  ui.setLives(e.lives, snap.maxLives, 'loss');
+  mode = 'respawn';
+  respawnAt = frameNow;
+  ui.showRespawn(touchSeen);
+});
+
+sim.on('died', (e) => {
+  flushBite();
+  const snap = sim.snapshot();
+  logEvent('died', { score: e.score, reason: e.death && e.death.reason });
   director.onDeath(snap, frameNow);
+  audio.setLives(0);
   audio.die();
-  try { beat.stop(); } catch (e) { console.warn(e); }
-  audio.stop();
+  if (beat.running) { try { beat.stop(); } catch (err) { console.warn(err); } }
+  ui.setLives(0, snap.maxLives, 'loss');
   const isNew = prefs.record(snap.score);
   mode = 'over';
   clearTimeout(overTimer);
@@ -141,8 +225,8 @@ function play() {
 
 function startRun() {
   clearTimeout(overTimer);
-  settingsFromReady = false;
-  sim.reset(nextSeed());
+  pausedFrom = null;
+  sim.reset(nextSeed()); // waiting 'start'
   if (autopilot) autopilot.reset();
   mode = 'ready';
   ui.showReady(touchSeen);
@@ -155,9 +239,25 @@ function again() {
   startRun();
 }
 
+/** First direction key of a run (waiting 'start'). */
 function begin(dir) {
   if (dir) sim.queueTurn(dir);
   sim.setPaused(false);
+  audio.start(); // the run opens on 3310 Ghost clicks
+  if (!beat.running) { try { beat.start(); } catch (e) { console.warn(e); } }
+  mode = 'playing';
+  ui.showPlaying();
+}
+
+/** First direction key after a lost life (waiting 'respawn'). */
+function respawn(dir) {
+  if (dir) {
+    const snap = sim.snapshot();
+    const turn = steerFor(dir, director.get().view, snap.heading || snap.dir);
+    if (turn) sim.queueTurn(turn);
+  }
+  sim.setPaused(false);
+  audio.respawned();
   mode = 'playing';
   ui.showPlaying();
 }
@@ -167,16 +267,18 @@ function togglePause() {
     sim.setPaused(true);
     mode = 'paused';
     ui.showPaused(true);
-    if (beat.running) audio.stop();
-  } else if (mode === 'paused' && settingsFromReady) {
-    settingsFromReady = false;
-    mode = 'ready';
+    audio.stop();
+  } else if (mode === 'paused' && pausedFrom) {
+    mode = pausedFrom; // still waiting for the first direction key
+    pausedFrom = null;
     ui.showPaused(false);
+    if (mode === 'respawn') ui.showRespawn(touchSeen); else ui.showReady(touchSeen);
   } else if (mode === 'paused') {
     sim.setPaused(false);
     mode = 'playing';
     ui.showPaused(false);
-    if (sim.snapshot().score > 0) audio.start();
+    audio.start();
+    if (!beat.running) { try { beat.start(); } catch (e) { console.warn(e); } }
   }
 }
 
@@ -193,6 +295,7 @@ createInput({
     if (source === 'swipe' || source === 'button') touchSeen = true;
     if (opts.auto) return;
     if (mode === 'ready') begin(dir);
+    else if (mode === 'respawn') respawn(dir);
     else if (mode === 'playing') {
       // First person steers relative to the snake's heading; board views use grid directions.
       const snap = sim.snapshot();
@@ -243,10 +346,8 @@ let last = null;
 let lastShowing = null;
 let lastFx = null;
 let glFailures = 0;
-
 let manualClock = false; // ?debug run(ms) drives a synthetic clock instead of rAF
 let invertFrames = 0;
-const cutLog = [];
 
 function rafFrame(t) {
   if (manualClock) return;
@@ -265,56 +366,71 @@ function frame(t) {
 
   if (mode === 'playing') {
     if (autopilot) {
-      for (let rem = dt; rem > 0; rem -= 12) {
+      for (let rem = dt; rem > 0 && mode === 'playing'; rem -= 12) {
         autopilot.update();
         sim.advance(Math.min(12, rem));
       }
     } else {
       sim.advance(dt);
     }
+    flushBite();
+  } else if (mode === 'respawn' && opts.auto && t - respawnAt > 700) {
+    respawn(null);
   }
 
   const snap = sim.snapshot();
-  director.update(snap, t);
+  const look = director.update(snap, t);
+  if (look && look.from === look.to && look.look !== look.prevLook) audio.setLook(look.look); // first-person fallback
   const d = director.get();
   if (d.showing !== lastShowing) {
     lastShowing = d.showing;
     ui.setScene(d.sceneInfo);
-    audio.setTimeline(d.timeline);
+    ui.setLifeIcon(lifeIconFor(d));
   }
   const p = prefs.get();
-  const fx = fxer.frame({ now: t, director: d, beat, prefs: p });
+  const fx = fxer.frame({ now: t, director: d, beat, prefs: p, snap });
   lastFx = fx;
 
   let glActive = false;
-  if (d.kind === '3d' && hasGL()) {
+  const u = uById.get(d.timeline);
+  if (d.kind === '3d' && hasGL() && u && u.gl) {
     try {
       engine.render(d.timeline, d.view, snap, fx);
       glActive = true;
       glFailures = 0;
     } catch (err) {
       if (++glFailures === 1) console.error('[main] room render failed', err);
-      if (glFailures >= 3) director.disable(d.timeline, t);
+      if (glFailures >= 3) director.disable(d.timeline, t, '3d');
     }
   }
   const glVis = glActive ? 'visible' : 'hidden';
   if (glCanvas.style.visibility !== glVis) glCanvas.style.visibility = glVis;
   const padSide = p.dpad && document.documentElement.dataset.dpad === 'side';
   flat.render({ snap, fx, d, timelines, glActive, persp, touch: p.dpad ? 'tap' : touchSeen, padSide });
+  ui.frame(fx, snap);
   if (invertEl.style.display === 'block') invertFrames++;
 }
 
-// ---------- debug ----------
+// ---------- debug (only with ?debug) ----------
 if (opts.debug) {
+  const seen = new Map(); // universe id -> Set of looks shown
+  const TURN = { up: ['left', 'right'], right: ['up', 'down'], down: ['right', 'left'], left: ['down', 'up'] }; // [left turn, right turn]
+  const KEY = (d) => `Arrow${d[0].toUpperCase()}${d.slice(1)}`;
   window.__ss = {
-    sim, director, engine, persp, timelines, scenes, prefs, audio, beat, flat,
+    sim, director, engine, persp, timelines, roomMods, universes, prefs, audio, beat, flat, ui,
     get fx() { return lastFx; },
+    get snap() { return sim.snapshot(); },
+    get d() { return director.get(); },
     quality,
     get mode() { return mode; },
-    force: (id) => director.force(id, frameNow),
-    lock: (on = true) => director.lock(on),
     cuts: cutLog,
+    events: eventLog,
+    seen,
     get invertFrames() { return invertFrames; },
+    /** Hold one universe (debug lock), or release with null. */
+    lock: (id = null) => { director.lock(!!id); return sim.lockUniverse(id); },
+    /** Hold one look ('2d' | '3d' | 'pov'), or release with null. */
+    look: (l = null) => director.setLook(l, frameNow),
     /** Drive `ms` of synthetic time in 16 ms frames; stops the rAF loop (reload to resume). */
     run(ms) {
       manualClock = true;
@@ -322,54 +438,57 @@ if (opts.debug) {
       for (let i = 0; i < ms / 16; i++) {
         t += 16;
         frame(t);
-        if (mode === 'over' && opts.auto) again(); // timers do not fire inside a synchronous run
+        const d = director.get();
+        if (!seen.has(d.timeline)) seen.set(d.timeline, new Set());
+        seen.get(d.timeline).add(d.look);
+        if (mode === 'over' && opts.auto) { clearTimeout(overTimer); again(); } // timers do not fire inside a synchronous run
       }
-      return { t, mode, score: sim.snapshot().score, cuts: cutLog.length };
+      const s = sim.snapshot();
+      return { t, mode, score: s.score, lives: s.lives, universe: s.universe.id, look: director.get().look, cuts: cutLog.length };
     },
+    /** Which universes and looks have been on screen since load. */
+    seenLooks() { return Object.fromEntries([...seen].map(([k, v]) => [k, [...v].sort()])); },
     /**
-     * Play through the real input path on the synthetic clock: arrow keydowns, or touch
-     * pointer swipes on the stage ({ swipe: true }). Eats `target` dots by BFS, then
-     * steers into a wall. Returns what was seen (scenes, phrases, first person, flashes).
+     * Play through the real input path on the synthetic clock: arrow keydowns, or touch pointer
+     * swipes on the stage ({ swipe: true }). Eats `target` food by the autopilot's search, resumes
+     * after lost lives by key, then steers into a wall. Returns what was seen.
      */
     drive({ swipe = false, target = 12, maxMs = 120000 } = {}) {
       const V = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] };
-      const OPP = { up: 'down', down: 'up', left: 'right', right: 'left' };
       const send = (d) => {
-        if (!swipe) { window.dispatchEvent(new KeyboardEvent('keydown', { code: `Arrow${d[0].toUpperCase()}${d.slice(1)}`, bubbles: true })); return; }
+        if (!swipe) { window.dispatchEvent(new KeyboardEvent('keydown', { code: KEY(d), bubbles: true })); return; }
         const r = stage.getBoundingClientRect();
         const x = r.left + r.width / 2, y = r.top + r.height / 2;
         const ev = (type, k) => stage.dispatchEvent(new PointerEvent(type, { pointerId: 9, pointerType: 'touch', isPrimary: true, bubbles: true, cancelable: true, clientX: x + V[d][0] * k, clientY: y + V[d][1] * k }));
         ev('pointerdown', 0); ev('pointermove', 12); ev('pointermove', 40); ev('pointerup', 40);
       };
-      const choose = (s) => {
-        const occ = new Set(s.snake.slice(0, -1).map((c) => `${c.x},${c.y}`));
-        const ok = (x, y) => x >= 0 && y >= 0 && x < s.cols && y < s.rows && !occ.has(`${x},${y}`);
-        const h = s.snake[0];
-        const q = [], seen = new Set();
-        for (const d of Object.keys(V)) {
-          const x = h.x + V[d][0], y = h.y + V[d][1];
-          if (d !== OPP[s.dir] && ok(x, y)) { q.push([x, y, d]); seen.add(`${x},${y}`); }
-        }
-        for (let i = 0; i < q.length; i++) {
-          const [x, y, d] = q[i];
-          if (s.food && x === s.food.x && y === s.food.y) return d;
-          for (const v of Object.values(V)) {
-            const k = `${x + v[0]},${y + v[1]}`;
-            if (ok(x + v[0], y + v[1]) && !seen.has(k)) { seen.add(k); q.push([x + v[0], y + v[1], d]); }
-          }
-        }
-        return q.length ? q[0][2] : s.dir;
+      // A grid direction as the key the player would press in the current view.
+      const press = (want, s) => {
+        if (director.get().view !== 'pov') return send(want);
+        const h = s.heading || s.dir;
+        if (want === TURN[h][0]) send('left');
+        else if (want === TURN[h][1]) send('right');
       };
-      const log = { modes: [mode], scenes: [], phrases: [], povFrames: 0, glFrames: 0, invertFrames: 0, strobeFrames: 0 };
-      if (mode === 'ready') send(choose(sim.snapshot()));
+      const log = { modes: [mode], scenes: [], phrases: [], respawns: 0, povFrames: 0, glFrames: 0, invertFrames: 0, strobeFrames: 0 };
+      if (mode === 'ready') send(chooseDir(sim.snapshot()) || 'up');
       log.modes.push(mode);
       let lastTick = -1, t = 0, lastPhrase = null;
-      while (t < maxMs && mode === 'playing') {
+      while (t < maxMs && (mode === 'playing' || mode === 'respawn')) {
         const s = sim.snapshot();
+        if (mode === 'respawn') {
+          this.run(200); t += 200;
+          send(chooseDir(sim.snapshot()) || s.dir);
+          log.respawns++;
+          continue;
+        }
         if (s.tick !== lastTick) {
           lastTick = s.tick;
-          const want = s.score >= target ? (s.dir === 'up' || s.dir === 'down' ? s.dir : 'up') : choose(s);
-          if (want !== s.dir) send(want);
+          let want;
+          if (s.score >= target) {
+            want = s.universe.rules === 'lane' ? (s.dir === 'left' || s.dir === 'right' ? s.dir : 'left')
+              : (s.dir === 'up' || s.dir === 'down' ? s.dir : 'up');
+          } else want = chooseDir(s) || s.dir;
+          if (want !== s.dir) press(want, s);
         }
         this.run(16); t += 16;
         const d = director.get();
@@ -382,19 +501,20 @@ if (opts.debug) {
       }
       log.modes.push(mode);
       const s = sim.snapshot();
-      return { ...log, score: s.score, death: s.death, ms: t, cuts: cutLog.slice(-60) };
+      return { ...log, score: s.score, lives: s.lives, death: s.death, ms: t, cuts: cutLog.slice(-60) };
     },
   };
 }
 
 // ---------- start ----------
+// Debug holds (only with ?debug; parseOptions drops them otherwise): a universe, a look.
+if (opts.lock && opts.universe && uById.has(opts.universe)) {
+  director.lock(true);
+  sim.lockUniverse(opts.universe);
+}
+if (opts.look) director.setLook(opts.look, frameNow);
 mode = 'title';
 ui.ready();
-if (opts.auto) {
-  ui.showTitle();
-  play();
-} else {
-  ui.showTitle();
-}
-applyLock();
+ui.showTitle();
+if (opts.auto) play();
 requestAnimationFrame(rafFrame);

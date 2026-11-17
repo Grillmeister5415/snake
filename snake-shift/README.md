@@ -1,7 +1,9 @@
 # SNAKE//SHIFT
 
-Classic Snake whose rules never change while every dot eaten snaps the visuals to another era:
-flat 2D timelines, real WebGL rooms, and now and then a first-person view.
+Snake where every dot eaten snaps the game to another universe: sixteen of them, shown as flat 2D
+boards, real WebGL rooms, and now and then a first-person view. The game picks the universe and its
+look at random; the player never chooses. Three rare special universes change the rules and are held
+for four to six bites, cutting between their 2D and 3D look on each bite.
 Plain ES modules, no dependencies, no build step, everything generated in code (~150 KB gzipped).
 
 ## Run
@@ -12,16 +14,37 @@ always shows the latest code. Tests: `npm test` (Node 20+, uses `node --test`).
 
 ## Controls
 
-- Arrows or WASD steer (by key position). The first direction starts the run.
+- Arrows or WASD steer (by key position). The first direction starts the run, and after a lost life the first direction resumes it.
 - In the first-person view, left and right turn relative to where the snake is heading; up and down do nothing there.
 - Swipe on the stage (22 px, chain turns in one drag). Optional on-screen arrows: settings > **Touch buttons**.
 - P or Escape pauses (and opens settings), M mutes, Enter or Space confirms.
+
+## Lives
+
+Every run starts with 3 lives, at most 5, shown as five slots beside the score in the current
+universe's own icon. A collision costs one: the snake respawns short at a safe spot in board view
+with score and universe intact, and waits for a direction. Zero lives ends the run. In Mushroom Land
+a mushroom (beside the dot, gone after 80 steps) is food and adds a life.
+
+## Universes
+
+| id | Look | Rules |
+|---|---|---|
+| `lcd` (opening), `arcade`, `acid`, `kombat`, `desktop`, `timewarp`, `wrong` | 2D | box |
+| `court`, `bunker`, `disco`, `plastic` | room, first person | box |
+| `hangar`, `abyss` | 2D, room, first person | box |
+| `mushroom` | 2D, room, first person | box + mushrooms, held |
+| `lane` | 2D, room, first person | endless lane (no end wall), held |
+| `castle` | 2D, room | cube (six faces, seams connect), held |
+
+A universe is `src/render/timelines/<id>.js` (2D) and/or `src/render/gl/rooms/<id>.js` (room); whatever
+loads is used. 3310 Ghost and Abyssal Cathedral are calm: no inversion, strobe or glitch while they show.
 
 ## The two switches
 
 The title shows a photosensitivity warning on every load. Wild by default: strobes, inversions, violent cuts.
 
-- **Reduced flash**: no strobes or inversions, at most one cut per 3.5 s and one big brightness swing per 5 s (with a soft veil), beat pulse capped at 15%.
+- **Reduced flash**: no strobes or inversions; every shift still happens on time (it can change the rules) but as a 450 ms veiled fade, and when shifts come less than 3.5 s apart the veil stays partly up between them. Beat pulse capped at 15%.
 - **Reduced motion**: scenery at 15% speed, no camera glides, no first-person view. Defaults to the system setting.
 
 Both are on the title and in settings, and are saved locally.
@@ -30,11 +53,16 @@ Both are on the title and in settings, and are saved locally.
 
 | Switch | Effect |
 |---|---|
-| `?debug` | `window.__ss`: sim, director, `run(ms)` synthetic clock, `drive({ swipe, target })`, cut log, quality |
-| `?auto` | autopilot plays and restarts on its own |
-| `?scene=court-pov&lock` | hold one scene (`lcd arcade acid kombat desktop timewarp wrong court disco plastic bunker`, rooms also `-pov`) |
+| `?debug` | `window.__ss`: sim, director, `run(ms)` synthetic clock, `drive({ swipe, target })`, `lock(id)`, `look(l)`, `seenLooks()`, cut and event logs |
+| `?auto` | autopilot plays, resumes after a lost life and restarts on its own |
+| `?debug&universe=hangar&lock` | hold one universe (every bite then flips its look); `?scene=` still works as an alias |
+| `?debug&look=2d\|3d\|pov` | hold a look wherever the universe has it |
+| `?debug&score=20` | start runs at that food total |
+| `?debug&lives=5` | starting lives (1 to 5) |
 | `?seed=abc` | fixed run |
-| `?nogl` | no WebGL: rooms are drawn in 2D perspective, no first person |
+| `?nogl` | no WebGL: the four built rooms are drawn in 2D perspective, new universes in 2D, no first person |
+
+The universe, look, score and lives switches work only together with `?debug`, so a player cannot use them to choose.
 | `?start=150&ramp=1.5&cap=95` | speed: ms per step at start, ms faster per dot, fastest ms |
 
 The server sends no cache headers: after editing, switch between `localhost` and `127.0.0.1` to see fresh code.
@@ -44,16 +72,18 @@ The server sends no cache headers: after editing, switch between `localhost` and
 ```
 index.html, style.css      shell: title, HUD, panels, touch pad
 src/main.js                loop, wiring, debug switches, quality scaling
-src/sim.js rng.js config.js the rules (16x16, one speed curve); never read visuals
-src/director.js fx.js      which scene shows when; per-frame effect values; both switches
+src/sim.js space.js flow.js rules-config.js
+                           the rules: lives, items, box/lane/cube spaces, the universe sequence
+src/config.js rng.js       speed curve, presentation constants, URL switches; seeded generator
+src/director.js fx.js      universe table, which look shows and how hard a cut hits; per-frame effects
 src/input.js ui.js prefs.js keys, swipes, pad; DOM; saved settings and best score
 src/autopilot.js           BFS player for ?auto and tests
 src/audio.js beat.js       procedural sound and the beat clock
 src/render/flat.js         2D canvas: timelines, glitch, phrase cards, first-person HUD
 src/render/registry.js     loads whatever modules exist, with stubs
-src/render/timelines/*.js  seven flat eras (lcd, arcade, acid, kombat, desktop, timewarp, wrong)
-src/render/gl/             WebGL engine and four rooms (court, disco, plastic, bunker)
+src/render/timelines/*.js  2D looks (and life() icons)
+src/render/gl/             WebGL engine and the rooms (3D looks, life() icons)
 src/render/persp.js        Canvas 2D stand-in for the rooms without WebGL
-tests/                     sim, director, beat (node --test)
+tests/                     rules, lives, spaces, flow, director, music, beat (node --test)
 dev/                       harness pages per stream; notes/ build notes per stream
 ```

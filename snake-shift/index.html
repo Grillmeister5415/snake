@@ -19,6 +19,7 @@
   <header id="hud" hidden>
     <div class="hud-plate">
       <output id="score" aria-label="Score">000</output>
+      <canvas id="lives" role="img" aria-label="3 of 5 lives"></canvas>
       <span class="era"><b id="era-name">3310 GHOST</b><i id="era-year">1999</i></span>
     </div>
     <nav class="hud-buttons" aria-label="Game controls">
@@ -35,11 +36,12 @@
     <button type="button" data-dir="down" aria-label="Down">&#9660;</button>
   </nav>
 
-  <p id="hint" hidden>PRESS AN ARROW TO START</p>
+  <p id="hint" hidden aria-live="polite">PRESS AN ARROW TO START</p>
 
   <section id="title" class="panel" aria-labelledby="title-h">
     <h1 id="title-h" class="logo" data-text="SNAKE//SHIFT">SNAKE<span>//</span>SHIFT</h1>
     <p class="tagline">EAT THE DOT. BREAK TIME.</p>
+    <p class="lives-note">3 LIVES &middot; MUSHROOMS GIVE MORE</p>
     <div class="warning" role="note">
       <strong>&#9888; PHOTOSENSITIVITY WARNING</strong>
       <p>This game uses rapid flashing, strobe bursts, full-screen colour inversion and violent scene cuts. If you or anyone watching has photosensitive epilepsy or is sensitive to flashing light, switch on <em>Reduced flash</em> before you play.</p>

@@ -1,444 +1,336 @@
+// Director (LEVELS_PLAN 4.1): the simulation picks universes, the director picks looks.
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildScenes, createDirector, clearAhead } from '../src/director.js';
+import { buildUniverses, simUniverses, createDirector, clearAhead, sceneId } from '../src/director.js';
 import { createSim } from '../src/sim.js';
 import { createAutopilot } from '../src/autopilot.js';
 import { createFx, createQuality } from '../src/fx.js';
-import { createRng } from '../src/rng.js';
-import { DIRECTOR as D } from '../src/config.js';
+import { DIRECTOR as D, parseOptions } from '../src/config.js';
 
-const FLATS = {
-  lcd: { name: '3310 GHOST', year: '1999', luma: 0.6, veil: '#8a9a72', weight: 1 },
-  arcade: { name: 'ELECTRIC ARCADE', year: '1986', luma: 0.08, veil: '#05030c', weight: 3 },
-  acid: { name: 'ACID PARADISE', year: '1968', luma: 0.7, veil: '#e0a040', weight: 3 },
-  kombat: { name: 'PIXEL KOMBAT', year: '1993', luma: 0.2, veil: '#301020', weight: 3 },
-  desktop: { name: 'DESKTOP ERROR', year: '1995', luma: 0.45, veil: '#008080', weight: 2 },
-};
-const ROOMS = {
-  court: { name: 'REALITY.EXE', year: '2088', luma: 0.25, veil: '#100828', weight: 3, views: ['board', 'pov'] },
-  bunker: { name: 'BERLIN BUNKER', year: '2026', luma: 0.06, veil: '#100000', weight: 2, views: ['board'] },
-};
-const scenes = buildScenes({ flats: FLATS, rooms: ROOMS });
-const lumaOf = (id) => scenes.find((s) => s.id === id).luma;
+const NEW = ['lane', 'hangar', 'mushroom', 'castle', 'abyss'];
+const OLD_ROOMS = ['court', 'disco', 'plastic', 'bunker'];
+const FLAT_IDS = ['lcd', 'arcade', 'acid', 'kombat', 'desktop', 'timewarp', 'wrong', ...NEW];
+const hud = (accent) => ({ fg: '#fff', bg: '#000', accent, panelFg: '#fff', panelBg: '#111' });
+const meta = (id, luma, more = {}) => ({ id, name: id.toUpperCase(), year: '1999', luma, veil: '#123456', weight: 2, hud: hud('#f0f'), ...more });
+const LUMAS = { lcd: 0.6, arcade: 0.08, acid: 0.7, kombat: 0.2, desktop: 0.45, timewarp: 0.45, wrong: 0.4, lane: 0.7, hangar: 0.55, mushroom: 0.22, castle: 0.6, abyss: 0.12, court: 0.25, disco: 0.35, plastic: 0.65, bunker: 0.06 };
+const FLATS = Object.fromEntries(FLAT_IDS.map((id) => [id, meta(id, LUMAS[id], id === 'abyss' ? { calm: true } : {})]));
+const ROOMS = Object.fromEntries([...OLD_ROOMS, ...NEW].map((id) => [id, meta(id, LUMAS[id], { year: `Y${id}` })]));
+const GL = Object.fromEntries(Object.entries(ROOMS).map(([id, m]) => [id, { ...m, kind: '3d', views: ['board', 'pov'] }]));
+const PERSP = Object.fromEntries(OLD_ROOMS.map((id) => [id, { ...ROOMS[id], kind: '3d', views: ['board'] }]));
 
-// A snapshot with plenty of room ahead (head mid-board facing right).
-const open = (score = 1) => ({ cols: 16, rows: 16, snake: [{ x: 4, y: 8 }, { x: 3, y: 8 }, { x: 2, y: 8 }], dir: 'right', score, alive: true });
-// Head two cells from the right wall.
-const blocked = (score = 1) => ({ cols: 16, rows: 16, snake: [{ x: 13, y: 8 }, { x: 12, y: 8 }, { x: 11, y: 8 }], dir: 'right', score, alive: true });
+const ALL = buildUniverses({ flats: FLATS, rooms: ROOMS, glRooms: GL });
+const NOGL = buildUniverses({ flats: FLATS, rooms: ROOMS, glRooms: null, perspRooms: PERSP });
+const byId = (list, id) => list.find((u) => u.id === id);
+const special = (id) => id === 'lane' || id === 'mushroom' || id === 'castle';
 
-function mkPrefs(o = {}) {
-  const p = { reducedFlash: false, reducedMotion: false, ...o };
-  return { p, fn: () => p };
-}
+const mkPrefs = (o = {}) => { const p = { reducedFlash: false, reducedMotion: false, ...o }; return { p, fn: () => p }; };
+// A snapshot with plenty of room ahead (head mid-board facing right), and one facing a wall.
+const open = (score = 5, more = {}) => ({ cols: 16, rows: 16, snake: [{ x: 4, y: 8 }, { x: 3, y: 8 }, { x: 2, y: 8 }], dir: 'right', score, alive: true, waiting: null, universe: { id: 'lcd' }, ...more });
+const blocked = (score = 5) => ({ ...open(score), snake: [{ x: 13, y: 8 }, { x: 12, y: 8 }, { x: 11, y: 8 }] });
 
-test('scene table is derived from what loaded', () => {
-  const ids = scenes.map((s) => s.id).sort();
-  assert.deepEqual(ids, ['acid', 'arcade', 'bunker', 'court', 'court-pov', 'desktop', 'kombat', 'lcd']);
-  const only = buildScenes({ flats: { lcd: FLATS.lcd } });
-  assert.equal(only.length, 1);
-  const d = createDirector({ scenes: only });
-  assert.equal(d.get().scene, 'lcd');
-  assert.equal(d.onBite(open(1), 1000), null, 'nothing to cut to with only LCD');
+test('universe table: a flat timeline and a room with the same id are one universe', () => {
+  assert.equal(ALL.length, 16);
+  assert.deepEqual(byId(ALL, 'hangar').looks, ['2d', '3d', 'pov']);
+  assert.deepEqual(byId(ALL, 'court').looks, ['3d', 'pov']);
+  assert.deepEqual(byId(ALL, 'lcd').looks, ['2d']);
+  assert.deepEqual(byId(ALL, 'castle').looks, ['2d', '3d'], 'castle has no first person');
+  assert.equal(byId(ALL, 'lane').rules, 'lane');
+  assert.equal(byId(ALL, 'castle').rules, 'cube');
+  assert.equal(byId(ALL, 'mushroom').mushrooms, true);
+  assert.deepEqual(ALL.filter((u) => u.rare).map((u) => u.id).sort(), ['timewarp', 'wrong']);
+  assert.deepEqual(ALL.filter((u) => u.calm).map((u) => u.id).sort(), ['abyss', 'lcd']);
+  const h = byId(ALL, 'hangar');
+  assert.equal(h.info['2d'].id, 'hangar');
+  assert.equal(h.info['3d'].id, 'hangar-3d');
+  assert.equal(h.info.pov.id, 'hangar-pov');
+  assert.equal(byId(ALL, 'court').info['3d'].id, 'court');
+  assert.equal(sceneId('court', 'pov', false), 'court-pov');
+  for (const u of ALL) for (const l of u.looks) {
+    const i = u.info[l];
+    assert.equal(i.timeline, u.id);
+    assert.equal(i.kind, l === '2d' ? '2d' : '3d');
+    assert.equal(i.view, l === 'pov' ? 'pov' : 'board');
+  }
 });
 
-test('first bite cuts LCD to Arcade with TIME BREAK!', () => {
-  const { fn } = mkPrefs();
-  const d = createDirector({ scenes, prefs: fn });
-  d.reset(0);
-  assert.equal(d.get().scene, 'lcd');
-  const cut = d.onBite(open(1), 1000);
-  assert.equal(cut.to, 'arcade');
+test('universe table: only what loaded; a universe with no look is never passed', () => {
+  const some = buildUniverses({ flats: { lcd: FLATS.lcd, arcade: FLATS.arcade }, rooms: { hangar: ROOMS.hangar }, glRooms: null });
+  assert.deepEqual(some.map((u) => u.id), ['lcd', 'arcade'], 'a room-only universe without WebGL has no look');
+  const gl = buildUniverses({ flats: { lcd: FLATS.lcd }, rooms: { hangar: ROOMS.hangar }, glRooms: { hangar: GL.hangar } });
+  assert.deepEqual(gl.map((u) => u.id), ['lcd', 'hangar']);
+  assert.deepEqual(byId(gl, 'hangar').looks, ['3d', 'pov']);
+  const sim = createSim({ universes: simUniverses(some), seed: 3 });
+  assert.deepEqual(sim.universes.map((u) => u.id), ['lcd', 'arcade']);
+});
+
+test('without WebGL: new universes show only 2D, the four built rooms use the stand-in, same sim table', () => {
+  for (const id of NEW) assert.deepEqual(byId(NOGL, id).looks, ['2d'], id);
+  for (const id of OLD_ROOMS) assert.deepEqual(byId(NOGL, id).looks, ['3d'], id);
+  assert.ok(byId(NOGL, 'court').persp && !byId(NOGL, 'court').gl);
+  // The rules table does not depend on WebGL, so a seed gives the same run on every device.
+  assert.deepEqual(simUniverses(NOGL), simUniverses(ALL));
+});
+
+/**
+ * Wire a real simulation to a director the way main.js does, and play it with the autopilot.
+ * Returns the log of bites and cuts. `gap` is the time between ticks in ms.
+ */
+function play({ universes = ALL, prefs = {}, hasGL = () => true, seed = 11, dseed = 5, foods = 300, gap = 140, start, look = null } = {}) {
+  const { p, fn } = mkPrefs(prefs);
+  const director = createDirector({ universes, seed: dseed, prefs: fn, hasGL });
+  if (look) director.setLook(look, 0);
+  const sim = createSim({ universes: simUniverses(universes), seed, start });
+  const auto = createAutopilot(sim);
+  let now = 0;
+  const log = { shifts: [], flips: [], held: [], lost: [], died: 0, ticks: 0, frames: [] };
+  const snap = () => sim.snapshot();
+  sim.on('reset', () => director.reset(now, snap()));
+  sim.on('ate', (e) => {
+    const c = director.onAte(e, snap(), now);
+    if (e.held) log.held.push({ e, c, d: director.get(), score: e.score, universe: snap().universe.id });
+    if (c) log.flips.push({ c, d: director.get(), snap: snap(), at: now });
+  });
+  sim.on('shift', (e) => {
+    const c = director.onShift(e, snap(), now);
+    log.shifts.push({ e, c, d: director.get(), snap: snap(), at: now });
+  });
+  sim.on('lifeLost', (e) => {
+    const before = director.get().look;
+    director.onLifeLost(e, snap(), now);
+    log.lost.push({ e, before, d: director.get() });
+  });
+  sim.on('died', () => { log.died++; director.onDeath(snap(), now); });
+  sim.reset(seed);
+  director.reset(now, snap());
+  sim.setPaused(false);
+  while (snap().score < foods && log.ticks < foods * 200) {
+    const s = snap();
+    if (!s.alive) { sim.reset(seed + log.ticks); sim.setPaused(false); continue; }
+    if (s.waiting) sim.setPaused(false);
+    auto.update();
+    sim.step();
+    log.ticks++;
+    now += gap;
+    director.update(snap(), now);
+    log.frames.push({ d: director.get(), at: now });
+    if (log.frames.length > 4000) log.frames.shift();
+  }
+  return { log, p, director, sim };
+}
+
+test('every shift is a cut to the universe the simulation chose, with a valid look and an impact', () => {
+  const { log } = play({ foods: 400 });
+  assert.ok(log.shifts.length > 200, `shifts ${log.shifts.length}`);
+  for (const s of log.shifts) {
+    assert.ok(s.c, 'a shift always cuts');
+    assert.equal(s.c.to, s.e.to);
+    assert.equal(s.d.universe, s.snap.universe.id);
+    const u = byId(ALL, s.e.to);
+    assert.ok(u.looks.includes(s.c.look), `${s.e.to} shown as ${s.c.look}`);
+    assert.equal(s.c.impact, !s.e.reset, 'impact on every shift except the silent Total Reset');
+    if (s.e.to === 'castle') assert.notEqual(s.c.look, 'pov');
+    if (s.c.look === 'pov') {
+      assert.ok(s.snap.score >= D.povMinScore, 'no first person before the fourth food');
+      assert.ok(clearAhead(s.snap), 'first person only with clear cells ahead');
+    }
+  }
+  assert.equal(log.shifts[0].c.look, '2d', 'arcade first');
+  assert.equal(log.shifts[0].d.phrase && log.shifts[0].d.phrase.text, 'TIME BREAK!');
+  assert.equal(log.shifts[1].e.to, 'court');
+});
+
+test('looks: new universes pick 2D about 40% of the time; rooms pick first person about 0.45 of the board', () => {
+  const { log } = play({ foods: 1500, seed: 3 });
+  const count = (pred) => log.shifts.filter((s) => !s.e.reset && pred(s)).length;
+  const newArr = count((s) => NEW.includes(s.e.to));
+  const new2d = count((s) => NEW.includes(s.e.to) && s.c.look === '2d');
+  assert.ok(newArr > 60, `new arrivals ${newArr}`);
+  const share = new2d / newArr;
+  assert.ok(share > 0.28 && share < 0.55, `2D share ${share.toFixed(2)}`);
+  const old = count((s) => OLD_ROOMS.includes(s.e.to) && s.snap.score >= D.povMinScore);
+  const pov = count((s) => OLD_ROOMS.includes(s.e.to) && s.c.look === 'pov');
+  assert.ok(pov > 0 && pov / old < 0.35, `old-room first person ${pov}/${old}`);
+  for (const id of [...NEW.filter((i) => i !== 'castle'), ...OLD_ROOMS]) {
+    assert.ok(log.shifts.some((s) => s.e.to === id), `${id} reached`);
+  }
+});
+
+test('held bites inside a special universe flip the look with a shift\'s impact; castle alternates 2D and 3D', () => {
+  const { log } = play({ foods: 1500, seed: 8 });
+  const specialHeld = log.held.filter((h) => special(h.universe));
+  assert.ok(specialHeld.length > 40, `held special bites ${specialHeld.length}`);
+  for (const h of specialHeld) {
+    assert.ok(h.c, 'a held special bite cuts');
+    assert.equal(h.c.from, h.c.to, 'same universe');
+    assert.notEqual(h.c.look, h.c.prevLook, 'a different look');
+    assert.ok(h.c.impact && h.c.held);
+    if (h.universe === 'castle') assert.ok(h.c.look === '2d' || h.c.look === '3d');
+  }
+  const rareHeld = log.held.filter((h) => h.universe === 'timewarp' || h.universe === 'wrong');
+  for (const h of rareHeld) assert.equal(h.c, null, 'held rare bite: local changes only, as built');
+});
+
+test('first person falls back to the board view after 12 seconds; never under Reduced motion', () => {
+  const u = byId(ALL, 'court');
+  const d = createDirector({ universes: ALL, seed: 1 });
+  d.setLook('pov', 0);
+  d.onShift({ from: 'lcd', to: 'court', index: 1 }, open(6), 0);
+  assert.equal(d.get().look, 'pov');
+  d.setLook(null, 0);
+  assert.equal(d.update(open(6), D.povTimeoutMs - 10), null);
+  const c = d.update(open(6), D.povTimeoutMs + 10);
+  assert.ok(c && c.look === '3d' && c.to === 'court', 'same universe, board view');
+  assert.ok(u.looks.includes('pov'));
+  const { log } = play({ foods: 600, prefs: { reducedMotion: true } });
+  assert.ok(log.shifts.every((s) => s.c.look !== 'pov') && log.flips.every((f) => f.c.look !== 'pov'));
+  assert.ok(log.frames.every((f) => f.d.view !== 'pov'));
+});
+
+test('a lost life forces the board look (never first person), with a phrase and a strobe burst', () => {
+  const d = createDirector({ universes: ALL, seed: 4 });
+  d.setLook('pov', 0);
+  d.onShift({ from: 'lcd', to: 'hangar', index: 3 }, open(9), 0);
+  assert.equal(d.get().look, 'pov');
+  d.setLook(null, 0);
+  d.onLifeLost({ lives: 2 }, open(9, { waiting: 'respawn' }), 1000);
   const g = d.get();
-  assert.equal(g.phrase.text, 'TIME BREAK!');
-  assert.ok(g.invertUntil >= 1060 && g.invertUntil <= 1090, 'wild bite impact is 60-90 ms');
-  assert.equal(g.showing, 'lcd', 'old scene shows inverted during the impact');
-  d.update(open(1), 1100);
-  assert.equal(d.get().showing, 'arcade');
-  assert.ok(g.strobe, 'the first cut is a big event');
+  assert.equal(g.look, '3d');
+  assert.equal(g.phrase.text, 'LIFE LOST');
+  assert.ok(g.strobe && Number.isFinite(g.invertUntil));
+  d.onLifeLost({ lives: 1 }, open(9, { waiting: 'respawn' }), 3000);
+  assert.equal(d.get().phrase.text, 'LAST LIFE');
+  const { log } = play({ foods: 800, seed: 21, gap: 60 });
+  assert.ok(log.lost.length > 0, 'the autopilot loses a life now and then');
+  for (const l of log.lost) assert.notEqual(l.d.look, 'pov');
 });
 
-test('scripted opening reaches the room, first person, and the silent LCD return', () => {
-  const { fn } = mkPrefs();
-  const d = createDirector({ scenes, prefs: fn });
-  d.reset(0);
-  const seq = [];
-  for (let i = 1; i <= 7; i++) { d.onBite(open(i), i * 2000); seq.push(d.get().scene); }
-  assert.deepEqual(seq, ['arcade', 'court', 'court-pov', 'lcd', 'court', 'arcade', 'court-pov']);
-  const d2 = createDirector({ scenes, prefs: fn });
-  d2.onBite(open(1), 1000); d2.onBite(open(2), 3000);
-  assert.equal(d2.get().phrase.text, 'WELCOME TO 2088');
-  d2.onBite(open(3), 5000);
-  assert.equal(d2.get().phrase, null, 'no phrase on first-person cuts');
-  d2.onBite(open(4), 7000);
-  assert.equal(d2.get().scene, 'lcd');
-  assert.equal(d2.get().phrase, null, 'no phrase on the silent return to LCD');
-});
-
-test('blocked first person is kept for the next bite', () => {
-  const { fn } = mkPrefs();
-  const d = createDirector({ scenes, prefs: fn });
-  d.onBite(open(1), 1000);
-  d.onBite(open(2), 2000);
-  assert.equal(d.get().scene, 'court');
-  assert.equal(clearAhead(blocked()), false);
-  d.onBite(blocked(3), 3000);
-  assert.notEqual(d.get().scene, 'court-pov');
-  d.onBite(open(4), 4000);
-  assert.equal(d.get().scene, 'court-pov');
-});
-
-test('first-person timeout cuts back to the board view of the same room', () => {
-  const { fn } = mkPrefs();
-  const d = createDirector({ scenes, prefs: fn });
-  d.force('court-pov', 1000, false);
-  d.update(open(), 1000 + D.povTimeoutMs - 1);
-  assert.equal(d.get().scene, 'court-pov');
-  d.update(open(), 1000 + D.povTimeoutMs + 1);
-  assert.equal(d.get().scene, 'court');
-});
-
-function longRun(prefs, opts = {}) {
-  const d = createDirector({ scenes, prefs: prefs.fn, seed: opts.seed ?? 11, hasGL: opts.hasGL });
-  const r = createRng(opts.seed ?? 99);
-  const cuts = [];
-  let now = 0, prev = d.get().scene, score = 0;
-  for (let i = 0; i < 3000; i++) {
-    now += 150 + r.int(4000);
-    score++;
-    const snap = r.chance(0.5) ? open(score) : blocked(score);
-    const c = d.onBite(snap, now);
-    const g = d.get();
-    if (c) {
-      assert.notEqual(g.scene, prev, 'never the same scene twice in a row');
-      cuts.push({ at: now, from: prev, to: g.scene, g });
-      prev = g.scene;
-    }
-    if (c && c.to.endsWith('-pov')) assert.ok(clearAhead(snap), 'first person only with clear cells ahead');
-    d.update(snap, now + 10);
-    if (d.get().scene !== prev) { cuts.push({ at: now + 10, from: prev, to: d.get().scene, g: d.get() }); prev = d.get().scene; }
+test('calm universes (3310 Ghost, Abyssal Cathedral): no inversion or strobe while they show', () => {
+  const { log } = play({ foods: 1200, seed: 5 });
+  const intoCalm = log.shifts.filter((s) => s.e.to === 'lcd' || s.e.to === 'abyss');
+  assert.ok(intoCalm.some((s) => s.e.to === 'abyss') && intoCalm.some((s) => s.e.to === 'lcd'));
+  for (const s of intoCalm) {
+    assert.equal(s.d.strobe, null, `${s.e.to}: no strobe`);
+    assert.ok(!Number.isFinite(s.d.invertUntil), `${s.e.to}: no inversion`);
   }
-  return cuts;
-}
-
-test('wild mode: a cut on every bite, never a repeat', () => {
-  const cuts = longRun(mkPrefs());
-  assert.ok(cuts.length > 2900);
-  for (const c of cuts) assert.notEqual(c.from, c.to);
-  assert.ok(cuts.some((c) => c.to === 'court-pov'));
+  // Leaving a calm universe keeps the impact, but on the new scene: the calm one never inverts.
+  const fromLcd = log.shifts.find((s) => s.e.from === 'lcd' && s.e.to !== 'abyss');
+  assert.ok(Number.isFinite(fromLcd.d.invertUntil));
+  assert.notEqual(fromLcd.d.showing, 'lcd');
+  // fx: calm zeroes strobe, inversion, glitch and split, and caps the beat pulse.
+  const fxer = createFx();
+  const beat = { running: true, sample: () => ({ pulse: 1, index: 3 }) };
+  const prefs = { reducedFlash: false, reducedMotion: false };
+  const calmD = { calm: true, chaos: 1, cutAt: 0, biteAt: 0, invertUntil: 1e9, strobe: { at: 0, count: 4, dur: 400 }, variant: 1, bite: null };
+  const fx = fxer.frame({ now: 10, director: calmD, beat, prefs });
+  assert.equal(fx.calm, true);
+  assert.equal(fx.strobe, 0);
+  assert.equal(fx.invert, false);
+  assert.equal(fx.glitch, 0);
+  assert.equal(fx.split, 0);
+  assert.ok(fx.beat <= 0.15);
+  const wild = createFx().frame({ now: 10, director: { ...calmD, calm: false }, beat, prefs });
+  assert.ok(wild.invert && wild.glitch > 0 && wild.beat === 1);
 });
 
-test('reduced flash: cut and swing limits hold over a long random sequence', () => {
-  const cuts = longRun(mkPrefs({ reducedFlash: true }), { seed: 5 });
-  assert.ok(cuts.length > 100);
-  let lastCut = -Infinity, lastSwing = -Infinity;
-  for (const c of cuts) {
-    assert.ok(c.at - lastCut >= D.reducedCutGapMs, `cut gap ${c.at - lastCut}`);
-    lastCut = c.at;
-    if (Math.abs(lumaOf(c.to) - lumaOf(c.from)) > D.swingLuma) {
-      assert.ok(c.at - lastSwing >= D.swingGapMs, `swing gap ${c.at - lastSwing}`);
-      lastSwing = c.at;
-      assert.ok(c.g.veil && c.g.veil.dur === D.veilMs && c.g.veil.from === 0.5, 'swing gets a veil');
-    }
-    assert.ok(!Number.isFinite(c.g.invertUntil), 'no inversion');
-    assert.equal(c.g.strobe, null, 'no strobe');
+test('Reduced flash: no inversion or strobe anywhere, every shift on time behind a veil that stays up when shifts come fast', () => {
+  const fast = play({ foods: 500, prefs: { reducedFlash: true }, gap: 60, seed: 2 });
+  const plain = play({ foods: 500, seed: 2, gap: 60 });
+  assert.deepEqual(fast.log.shifts.map((s) => s.e.to), plain.log.shifts.map((s) => s.e.to), 'shifts are never skipped');
+  for (const s of fast.log.shifts) {
+    assert.ok(!Number.isFinite(s.d.invertUntil), 'no inversion');
+    assert.equal(s.d.strobe, null, 'no strobe');
+    assert.ok(s.d.veil && s.d.veil.from > 0, 'a veiled fade');
   }
+  for (const f of fast.log.frames) assert.ok(!f.d.strobe && !Number.isFinite(f.d.invertUntil));
+  // Fast shifts (< 3.5 s apart): the veil never drops away between them.
+  const d = createDirector({ universes: ALL, seed: 3, prefs: () => ({ reducedFlash: true, reducedMotion: false }) });
+  d.onShift({ from: 'lcd', to: 'arcade', index: 1 }, open(1), 1000);
+  d.onShift({ from: 'arcade', to: 'acid', index: 2 }, open(2), 2000);
+  d.update(open(2), 2900);
+  const mid = d.get().veil;
+  assert.ok(mid && mid.from > 0.1, `veil partly up between fast shifts (${mid && mid.from})`);
+  d.update(open(2), 2000 + D.veilGapMs + 50);
+  assert.equal(d.get().veil, null, 'and gone once they stop');
+  // A single shift after a long gap fades in 450 ms.
+  d.onShift({ from: 'acid', to: 'kombat', index: 3 }, open(3), 20000);
+  d.update(open(3), 20000 + D.veilMs + 20);
+  assert.equal(d.get().veil, null);
 });
 
-test('no first person under reduced motion', () => {
-  const cuts = longRun(mkPrefs({ reducedMotion: true }), { seed: 8 });
-  assert.ok(cuts.length > 1000);
-  assert.ok(cuts.every((c) => !c.to.endsWith('-pov')));
-});
-
-test('no 3D without WebGL, and losing it cuts back to a flat scene', () => {
-  const cuts = longRun(mkPrefs(), { hasGL: () => false, seed: 3 });
-  assert.ok(cuts.every((c) => !['court', 'court-pov', 'bunker'].includes(c.to)));
+test('without WebGL the director never shows a room look the device cannot draw', () => {
+  const { log } = play({ universes: NOGL, foods: 600, hasGL: () => false });
+  for (const s of log.shifts) {
+    if (NEW.includes(s.e.to)) assert.equal(s.c.look, '2d', `${s.e.to} in 2D`);
+    if (OLD_ROOMS.includes(s.e.to)) assert.equal(s.c.look, '3d', `${s.e.to} through the stand-in`);
+  }
+  // Losing WebGL mid-run: a room look falls back to the universe's 2D look.
   let gl = true;
-  const d = createDirector({ scenes, hasGL: () => gl });
-  d.force('court', 0);
+  const d = createDirector({ universes: ALL, seed: 2, hasGL: () => gl });
+  d.setLook('3d', 0);
+  d.onShift({ from: 'lcd', to: 'mushroom', index: 4 }, open(6), 0);
+  assert.equal(d.get().look, '3d');
   gl = false;
-  d.update(open(), 100);
-  assert.equal(d.get().kind, '2d');
+  d.update(open(6), 100);
+  assert.equal(d.get().look, '2d');
+  assert.equal(d.get().universe, 'mushroom');
 });
 
-test('chaos rises with score', () => {
-  const d = createDirector({ scenes });
-  d.onBite(open(5), 100);
-  assert.equal(d.get().chaos, 0.2);
-  d.onBite(open(40), 200);
-  assert.equal(d.get().chaos, 1);
+test('replay: the director cannot change the run (prefs, WebGL and look locks give the same simulation)', () => {
+  const runs = [
+    play({ foods: 200, seed: 31 }),
+    play({ foods: 200, seed: 31, prefs: { reducedFlash: true, reducedMotion: true }, dseed: 99 }),
+    play({ foods: 200, seed: 31, universes: NOGL, hasGL: () => false }),
+    play({ foods: 200, seed: 31, look: '2d' }),
+  ];
+  const key = (r) => r.log.shifts.map((s) => `${s.e.to}@${s.snap.tick}`).join(' ');
+  for (const r of runs.slice(1)) assert.equal(key(r), key(runs[0]));
+  assert.equal(runs[3].log.shifts.filter((s) => byId(ALL, s.e.to).looks.includes('2d')).every((s) => s.c.look === '2d'), true, 'a look lock holds');
 });
 
-test('replay: a director forcing every scene and toggling both switches cannot change the run', () => {
-  const N = 6000;
-  const run = (attach) => {
-    const sim = createSim({ seed: 'replay' });
-    const ap = createAutopilot(sim);
-    const ticks = [];
-    let now = 0;
-    let d = null, fx = null, prefs = null, k = 0;
-    if (attach) {
-      prefs = { reducedFlash: false, reducedMotion: false };
-      d = createDirector({ scenes, prefs: () => prefs, seed: 1 });
-      fx = createFx();
-      const order = scenes.map((s) => s.id);
-      sim.on('ate', () => {
-        const snap = sim.snapshot();
-        d.onBite(snap, now);
-        let id = order[k++ % order.length];
-        if (id === d.get().scene) id = order[k++ % order.length];
-        d.force(id, now);
-        prefs = { reducedFlash: k % 2 === 0, reducedMotion: k % 3 === 0 };
-      });
-      sim.on('died', () => d.onDeath(sim.snapshot(), now));
-      sim.on('reset', () => d.reset(now));
-    }
-    sim.setPaused(false);
-    for (let i = 0; i < N; i++) {
-      ap.update();
-      now += 37;
-      sim.advance(37);
-      if (attach) {
-        const snap = sim.snapshot();
-        d.update(snap, now);
-        const f = fx.frame({ now, director: d.get(), beat: null, prefs });
-        assert.equal(typeof f.time, 'number');
-        assert.throws(() => { snap.snake[0].x = -1; }, TypeError);
-      }
-      const s = sim.snapshot();
-      ticks.push(JSON.stringify(s));
-      if (!s.alive) { sim.reset(`replay-${i}`); ap.reset(); sim.setPaused(false); }
-    }
-    return ticks;
-  };
-  const a = run(false);
-  const b = run(true);
-  assert.equal(a.length, b.length);
-  for (let i = 0; i < a.length; i++) assert.equal(b[i], a[i], `tick ${i} differs`);
-});
-
-// ---------- wave 2 (integrate): rare scenes, Total Reset, variety, fx.prev ----------
-
-const WIDE = buildScenes({
-  flats: { ...FLATS, timewarp: { name: 'TIME WARP', year: '????', luma: 0.45, weight: 1 }, wrong: { name: 'WRONG UNIVERSE', luma: 0.4, weight: 1 } },
-  rooms: { ...ROOMS, disco: { name: 'DISCO', year: '1978', luma: 0.35 }, plastic: { name: 'PLASTIC', year: '1999', luma: 0.65 } },
-});
-const RARE_IDS = new Set(['timewarp', 'wrong']);
-
-/** Feed `bites` bites, `gap` ms apart, with an open snapshot. Returns per-bite records. */
-function feed(d, bites, gap = 1500, t0 = 0) {
-  const out = [];
-  let t = t0;
-  for (let score = 1; score <= bites; score++) {
-    t += gap;
-    const snap = open(score);
-    const before = d.get().scene;
-    const cut = d.onBite(snap, t);
-    d.update(snap, t + 200);
-    out.push({ score, before, cut, after: d.get().scene, g: d.get() });
-  }
-  return out;
-}
-
-test('rare scenes: marked, never in the opening or early, never back to back, held 1-2 bites', () => {
-  assert.deepEqual(WIDE.filter((s) => s.rare).map((s) => s.id).sort(), ['timewarp', 'wrong']);
-  let entries = 0;
-  for (let seed = 1; seed <= 300; seed++) {
-    const d = createDirector({ scenes: WIDE, seed, prefs: () => ({ reducedFlash: false, reducedMotion: false }) });
-    const recs = feed(d, 40);
-    let held = 0, inRare = null;
-    for (const r of recs) {
-      if (r.cut && RARE_IDS.has(r.cut.to)) {
-        entries++;
-        assert.ok(r.score >= D.rareMinScore, `rare scene at score ${r.score}`);
-        assert.ok(r.score > 7, 'not inside the scripted opening');
-        assert.ok(!RARE_IDS.has(r.before), 'never rare straight after rare');
-        inRare = r.cut.to; held = 0;
-      } else if (inRare && r.before === inRare) {
-        if (!r.cut) held++;
-        else { assert.ok(held <= D.rareHoldMax - 1, `held ${held + 1} bites`); inRare = null; }
-      }
-    }
-  }
-  assert.ok(entries > 50, `rare scenes do appear (${entries} in 300 runs)`);
-});
-
-test('rare scenes are rare: well under 10% of cuts', () => {
-  let cuts = 0, rare = 0;
-  for (let seed = 1; seed <= 200; seed++) {
-    const d = createDirector({ scenes: WIDE, seed });
-    for (const r of feed(d, 30)) if (r.cut) { cuts++; if (RARE_IDS.has(r.cut.to)) rare++; }
-  }
-  assert.ok(rare / cuts < 0.1 && rare > 0, `rare share ${(rare / cuts).toFixed(3)}`);
-});
-
-test('Total Reset: only after a room, timewarp or wrong; silent snap to LCD; likelier with chaos', () => {
-  const early = { n: 0, r: 0 }, late = { n: 0, r: 0 };
-  for (let seed = 1; seed <= 400; seed++) {
-    const d = createDirector({ scenes: WIDE, seed });
-    for (const r of feed(d, 40)) {
-      const from = WIDE.find((s) => s.id === r.before);
-      const eligible = r.score > 7 && from && (from.kind === '3d' || from.rare);
-      if (eligible) { const b = r.g.chaos < 0.5 ? early : late; b.n++; if (r.cut && r.cut.reset) b.r++; }
-      if (!r.cut || !r.cut.reset) continue;
-      assert.ok(eligible, `reset from ${r.before} at score ${r.score}`);
-      assert.equal(r.cut.to, 'lcd');
-      assert.equal(r.cut.impact, false);
-      assert.equal(r.g.phrase, null, 'no phrase card on the silent return');
-      assert.equal(r.g.strobe, null);
-      assert.ok(!(r.g.invertUntil > r.cut.at), 'no inversion');
-    }
-  }
-  assert.ok(early.r > 0 && late.r > 0, 'resets happen');
-  assert.ok(late.r / late.n > early.r / early.n, `rises with chaos (${(early.r / early.n).toFixed(3)} -> ${(late.r / late.n).toFixed(3)})`);
-});
-
-test('Total Reset obeys the reduced-flash limiter', () => {
-  const { p, fn } = mkPrefs({ reducedFlash: true });
-  for (let seed = 1; seed <= 100; seed++) {
-    const d = createDirector({ scenes: WIDE, seed, prefs: fn });
-    let lastCut = -Infinity, lastSwing = -Infinity;
-    for (const r of feed(d, 60, 900)) {
-      if (!r.cut) continue;
-      assert.ok(r.cut.at - lastCut >= D.reducedCutGapMs, 'cut gap');
-      if (r.cut.swing) { assert.ok(r.cut.at - lastSwing >= D.swingGapMs, 'swing gap'); lastSwing = r.cut.at; }
-      lastCut = r.cut.at;
-    }
-  }
-  assert.ok(p.reducedFlash);
-});
-
-test('variety: every loaded scene is reached, no scene dominates after the opening', () => {
-  const count = new Map();
-  let total = 0;
-  for (let seed = 1; seed <= 200; seed++) {
-    const d = createDirector({ scenes: WIDE, seed });
-    for (const r of feed(d, 30)) if (r.cut && r.score > 7) { total++; count.set(r.cut.to, (count.get(r.cut.to) || 0) + 1); }
-  }
-  for (const s of WIDE) assert.ok(count.get(s.id) > 0, `${s.id} never picked`);
-  for (const [id, n] of count) assert.ok(n / total < 0.2, `${id} has ${(100 * n / total).toFixed(1)}%`);
-});
-
-test('fx.prev is the previous timeline or room; fx.biteAge is Infinity with no bite', () => {
-  const d = createDirector({ scenes: WIDE, seed: 3 });
+test('fx: lives, universe, look, calm and rules (LEVELS_PLAN 4.2); prev is the previous universe', () => {
+  const sim = createSim({ universes: simUniverses(ALL), seed: 4, start: { universe: 'castle', lives: 4 } });
+  const d = createDirector({ universes: ALL, seed: 3 });
+  d.reset(0, sim.snapshot());
   const fxer = createFx();
   const beat = { running: false };
   const prefs = { reducedFlash: false, reducedMotion: false };
-  let fx = fxer.frame({ now: 0, director: d.get(), beat, prefs });
+  let fx = fxer.frame({ now: 0, director: d.get(), beat, prefs, snap: sim.snapshot() });
+  assert.equal(fx.lives, 4);
+  assert.equal(fx.maxLives, 5);
+  assert.equal(fx.universe, 'castle');
+  assert.equal(fx.rules, 'cube');
+  assert.ok(fx.look === '2d' || fx.look === '3d');
+  assert.equal(fx.calm, false);
+  assert.equal(fx.waiting, 'start');
   assert.equal(fx.biteAge, Infinity);
-  assert.equal(fx.bite, null);
-  assert.equal(fx.punch, 0);
-  assert.equal(fx.prev, 'lcd');
-  d.force('court-pov', 100, false);
-  d.force('timewarp', 200, false);
-  fx = fxer.frame({ now: 300, director: d.get(), beat, prefs });
-  assert.equal(fx.scene, 'timewarp');
-  assert.equal(fx.prev, 'court', 'a first-person scene reports its room id');
-  d.onBite(open(5), 400);
-  fx = fxer.frame({ now: 450, director: d.get(), beat, prefs });
+  d.onShift({ from: 'castle', to: 'abyss', index: 1 }, open(5), 100);
+  fx = fxer.frame({ now: 600, director: d.get(), beat, prefs, snap: null });
+  assert.equal(fx.prev, 'castle');
+  assert.equal(fx.calm, true);
+  d.onAte({ score: 6, cell: { x: 3, y: 3 }, held: false }, open(6), 700);
+  fx = fxer.frame({ now: 750, director: d.get(), beat, prefs });
   assert.equal(fx.biteAge, 50);
-  d.reset(1000);
-  fx = fxer.frame({ now: 1010, director: d.get(), beat, prefs });
-  assert.equal(fx.biteAge, Infinity, 'a new run clears the bite');
+  assert.deepEqual(fx.bite, { x: 3, y: 3 });
 });
 
-// ---------- wave 3 (finish): the real eleven timelines, and the 2D perspective fallback ----------
-
-const FLAT_REAL = ['lcd', 'arcade', 'acid', 'kombat', 'desktop', 'timewarp', 'wrong'];
-const ROOM_REAL = ['court', 'disco', 'plastic', 'bunker'];
-const { FALLBACK_ROOMS } = await import('../src/render/persp.js');
-async function metaOf(path, fallback) {
-  try { return (await import(path)).meta || fallback; } catch { return fallback; } // a room mid-edit elsewhere must not fail this file
-}
-const REAL = buildScenes({
-  flats: Object.fromEntries(await Promise.all(FLAT_REAL.map(async (id) => [id, await metaOf(`../src/render/timelines/${id}.js`, { luma: 0.4 })]))),
-  rooms: Object.fromEntries(await Promise.all(ROOM_REAL.map(async (id) => [id, await metaOf(`../src/render/gl/rooms/${id}.js`, FALLBACK_ROOMS[id])]))),
-});
-const realLuma = (id) => REAL.find((s) => s.id === id).luma;
-
-/** Bites at random gaps over random open/blocked snapshots, the way longRun does, on REAL scenes. */
-function realRun(p, { seed = 21, bites = 4000, hasGL } = {}) {
-  const d = createDirector({ scenes: REAL, prefs: () => p, seed, hasGL });
-  const r = createRng(seed * 7 + 1);
-  const cuts = [];
-  let now = 0, prev = d.get().scene;
-  for (let score = 1; score <= bites; score++) {
-    now += 150 + r.int(4000);
-    const snap = r.chance(0.6) ? open(score) : blocked(score);
-    const c = d.onBite(snap, now);
-    if (c) {
-      const g = d.get();
-      assert.notEqual(g.scene, prev, 'never the same scene twice in a row');
-      if (g.scene.endsWith('-pov')) assert.ok(clearAhead(snap), 'first person only with clear cells');
-      cuts.push({ at: now, from: prev, to: g.scene, score, reset: !!c.reset, g });
-      prev = g.scene;
-    }
-    d.update(snap, now + 10);
-    if (d.get().scene !== prev) { cuts.push({ at: now + 10, from: prev, to: d.get().scene, score, g: d.get() }); prev = d.get().scene; }
-  }
-  return cuts;
-}
-
-test('all eleven timelines: real metas give fifteen scenes with valid luma and HUD colours', () => {
-  assert.equal(REAL.length, 15);
-  assert.equal(new Set(REAL.map((s) => s.id)).size, 15);
-  assert.deepEqual(REAL.filter((s) => s.rare).map((s) => s.id).sort(), ['timewarp', 'wrong']);
-  for (const s of REAL) {
-    assert.ok(s.luma >= 0 && s.luma <= 1, `${s.id} luma ${s.luma}`);
-    assert.ok(s.hud && s.hud.fg && s.hud.bg && s.hud.accent, `${s.id} has hud colours`);
-  }
-  assert.equal(REAL.find((s) => s.id === 'bunker').clock, '04:37');
-});
-
-test('all eleven, wild: every scene reached, none dominates, rare stays rare and late', () => {
-  const cuts = realRun({ reducedFlash: false, reducedMotion: false });
-  const hist = {};
-  for (const c of cuts) if (!c.reset) hist[c.to] = (hist[c.to] || 0) + 1; // Total Resets add LCD on purpose
-  for (const s of REAL) assert.ok(hist[s.id] > 0, `${s.id} reached`);
-  for (const [id, n] of Object.entries(hist)) assert.ok(n / cuts.length < 0.15, `${id} share ${(n / cuts.length).toFixed(3)}`);
-  for (const id of ['timewarp', 'wrong']) assert.ok(hist[id] / cuts.length < 0.05, `${id} share ${(hist[id] / cuts.length).toFixed(3)}`);
-  for (let i = 1; i < cuts.length; i++) {
-    if (RARE_IDS.has(cuts[i].to)) {
-      assert.ok(!RARE_IDS.has(cuts[i].from), 'rare never follows rare');
-      assert.ok(cuts[i].score >= D.rareMinScore);
-    }
-  }
-  const resets = cuts.filter((c) => c.reset);
-  assert.ok(resets.length > 0 && resets.every((c) => c.to === 'lcd'), 'Total Resets happen and land on LCD');
-});
-
-test('all eleven, reduced flash: cut gap, swing gap and veil, no inversion or strobe', () => {
-  const cuts = realRun({ reducedFlash: true, reducedMotion: false }, { seed: 4 });
-  assert.ok(cuts.length > 300);
-  let lastCut = -Infinity, lastSwing = -Infinity;
-  for (const c of cuts) {
-    assert.ok(c.at - lastCut >= D.reducedCutGapMs, `cut gap ${c.at - lastCut}`);
-    lastCut = c.at;
-    if (Math.abs(realLuma(c.to) - realLuma(c.from)) > D.swingLuma) {
-      assert.ok(c.at - lastSwing >= D.swingGapMs, `swing gap ${c.at - lastSwing}`);
-      lastSwing = c.at;
-    }
-    assert.ok(!Number.isFinite(c.g.invertUntil), 'no inversion');
-    assert.equal(c.g.strobe, null, 'no strobe');
-  }
-});
-
-test('all eleven: no first person under reduced motion; no rooms without WebGL or fallback', () => {
-  assert.ok(realRun({ reducedFlash: false, reducedMotion: true }, { seed: 9, bites: 1500 }).every((c) => !c.to.endsWith('-pov')));
-  assert.ok(realRun({ reducedFlash: false, reducedMotion: false }, { seed: 10, bites: 1500, hasGL: () => false }).every((c) => c.g.kind === '2d'));
-});
-
-test('2D perspective fallback: four rooms, board view only, reached by the director', async () => {
-  const { loadPersp } = await import('../src/render/registry.js');
-  const fb = await loadPersp({ cols: 16, rows: 16 });
-  assert.ok(fb && typeof fb.persp.render === 'function');
-  assert.deepEqual(Object.keys(fb.rooms).sort(), [...ROOM_REAL].sort());
-  const sc = buildScenes({ flats: { lcd: { luma: 0.6 }, arcade: { luma: 0.08 } }, rooms: fb.rooms });
-  assert.ok(sc.every((s) => s.view === 'board'), 'no first person without WebGL');
-  const d = createDirector({ scenes: sc, seed: 2, hasGL: () => true });
-  const seen = new Set();
-  for (const r of feed(d, 60)) seen.add(r.after);
-  for (const id of ROOM_REAL) assert.ok(seen.has(id), `${id} reached through the fallback`);
+test('switches: universe, look, lock, score and lives work only with ?debug', () => {
+  const on = parseOptions('?debug&universe=hangar&lock&look=pov&score=12&lives=5&seed=4');
+  assert.equal(on.universe, 'hangar');
+  assert.equal(on.lock, true);
+  assert.equal(on.look, 'pov');
+  assert.equal(on.score, 12);
+  assert.equal(on.lives, 5);
+  const off = parseOptions('?universe=hangar&lock&look=pov&score=12&lives=5&seed=4');
+  assert.equal(off.universe, null);
+  assert.equal(off.lock, false);
+  assert.equal(off.look, null);
+  assert.equal(off.score, null);
+  assert.equal(off.lives, null);
+  assert.equal(off.seed, '4');
+  assert.equal(parseOptions('?debug&scene=court-pov').universe, 'court', 'the old ?scene= still names a universe');
+  assert.equal(parseOptions('?debug&look=side').look, null);
+  assert.equal(parseOptions('?debug&lives=9').lives, 5);
+  assert.equal(parseOptions('?nogl&auto').nogl, true);
 });
 
 test('quality scaling: two seconds of slow frames lower the resolution; fast or throttled frames do not', () => {
@@ -454,4 +346,39 @@ test('quality scaling: two seconds of slow frames lower the resolution; fast or 
   assert.equal(q.scale, 0.5, 'steps down again while still slow');
   for (let i = 0; i < 400; i++) q.sample(45);
   assert.equal(q.level, 2, 'never below the last level');
+});
+
+// ---------- the real modules: whatever has loaded in this checkout ----------
+async function load(path) {
+  try { return await import(path); } catch { return null; } // missing or mid-edit elsewhere: skipped, like the registry
+}
+const realFlats = {}, realRooms = {}, realMods = {};
+for (const id of FLAT_IDS) { const m = await load(`../src/render/timelines/${id}.js`); if (m && m.meta) { realFlats[id] = m.meta; realMods[`2d:${id}`] = m; } }
+for (const id of [...OLD_ROOMS, ...NEW]) { const m = await load(`../src/render/gl/rooms/${id}.js`); if (m && m.meta) { realRooms[id] = m.meta; realMods[`3d:${id}`] = m; } }
+
+test('real modules: valid scene info for every look, life() icons where exported, the stand-in rooms', async () => {
+  const glRooms = Object.fromEntries(Object.entries(realRooms).map(([id, m]) => [id, { ...m, views: ['board', 'pov'] }]));
+  const real = buildUniverses({ flats: realFlats, rooms: realRooms, glRooms });
+  assert.ok(real.length >= 14, `universes ${real.map((u) => u.id).join(' ')}`);
+  for (const u of real) for (const l of u.looks) {
+    const i = u.info[l];
+    assert.ok(i.luma >= 0 && i.luma <= 1, `${i.id} luma ${i.luma}`);
+    assert.ok(i.hud && i.hud.fg && i.hud.bg && i.hud.accent, `${i.id} has HUD colours`);
+  }
+  for (const id of ['hangar', 'mushroom', 'abyss']) {
+    if (realFlats[id] && realRooms[id]) assert.deepEqual(byId(real, id).looks, ['2d', '3d', 'pov'], id);
+  }
+  for (const [key, m] of Object.entries(realMods)) {
+    if (typeof m.life !== 'function') continue;
+    const calls = [];
+    const ctx = new Proxy({}, { get: (t, k) => (k in t ? t[k] : (...a) => { calls.push(k); return { addColorStop() {} }; }), set: (t, k, v) => { t[k] = v; return true; } });
+    m.life(ctx, 0, 0, 16, true, { chaos: 0.5, time: 1, now: 1000 });
+    m.life(ctx, 20, 0, 16, false, { chaos: 0, time: 1, now: 1000 });
+    assert.ok(calls.length > 0, `${key} life() draws`);
+  }
+  const { loadPersp } = await import('../src/render/registry.js');
+  const fb = await loadPersp({ cols: 16, rows: 16 });
+  assert.ok(fb && typeof fb.persp.render === 'function');
+  assert.deepEqual(Object.keys(fb.rooms).sort(), [...OLD_ROOMS].sort());
+  assert.ok(Object.values(fb.rooms).every((r) => r.views.length === 1 && r.views[0] === 'board'));
 });

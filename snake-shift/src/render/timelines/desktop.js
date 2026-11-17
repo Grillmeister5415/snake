@@ -174,9 +174,10 @@ function drawDot(ctx, L, snap, fx) {
   ctx.restore();
 }
 
+// Gap-safe (LEVELS_PLAN 3.3): the neck only counts when no break splits snake[0] from snake[1].
 function headDir(snap) {
   const s = snap.snake;
-  if (s.length > 1) { const dx = X(s[0]) - X(s[1]), dy = Y(s[0]) - Y(s[1]); if (Math.abs(dx) + Math.abs(dy) === 1) return [dx, dy]; }
+  if (s.length > 1 && !(snap.breaks && snap.breaks[0] === 0)) { const dx = X(s[0]) - X(s[1]), dy = Y(s[0]) - Y(s[1]); if (Math.abs(dx) + Math.abs(dy) === 1) return [dx, dy]; }
   return DIRS[snap.dir] || [1, 0];
 }
 
@@ -191,9 +192,10 @@ export function drawSnake(ctx, L, snap, fxIn, accent) {
   const b1 = dead ? DEAD_BAR[0] : a.bar, b2 = dead ? DEAD_BAR[1] : a.bar2;
   const p = Math.max(1, Math.round(c * 0.1)), tb = Math.max(3, Math.round(c * 0.24)), wv = c - 2 * p;
   ctx.save();
-  // XOR-style drag outline where the tail just was
-  if (!dead && snap.prevTail && !snap.grew && s.length > 1) {
-    const t = snap.prevTail, x = L.bx + X(t) * c, y = L.by + Y(t) * c;
+  // XOR-style drag outline where the tail just was: only while moving, and only behind the real tail
+  const t = snap.prevTail, last = s[s.length - 1];
+  if (!dead && !snap.waiting && t && !snap.grew && s.length > 1 && !(snap.length > s.length) && Math.abs(X(t) - X(last)) + Math.abs(Y(t) - Y(last)) === 1) {
+    const x = L.bx + X(t) * c, y = L.by + Y(t) * c;
     ctx.setLineDash([2, 2]); ctx.lineWidth = 1; ctx.strokeStyle = '#9fb7c0';
     ctx.strokeRect(x + p + 0.5, y + p + 0.5, wv - 1, wv - 1); ctx.setLineDash([]);
   }
@@ -499,4 +501,23 @@ function timeFault(ctx, L, fx) {
   const lines = ['TIME FAULT 0437:1995', '', 'The current decade has been halted.', '* Press any key to shift timelines.', '* Press CTRL+ALT+DEL to lose your score.'];
   lines.forEach((ln, i) => ctx.fillText(ln, Math.round(L.w * 0.04), Math.round(L.h * 0.06) + i * fs * 1.4));
   ctx.globalAlpha = 1;
+}
+
+// Life slot (LEVELS_PLAN 4.3): a tiny window. Filled = bevelled window with a title bar and a white
+// client area; hollow = the dotted XOR drag outline of a window that is not there.
+export function life(ctx, x, y, size, filled, fx) {
+  const w = Math.round(size * 0.86), h = Math.round(size * 0.74), x0 = Math.round(x + (size - w) / 2), y0 = Math.round(y + (size - h) / 2);
+  const tb = Math.max(3, Math.round(h * 0.26)), a = ACC[mod(num(fx && fx.variant), ACC.length)];
+  ctx.save();
+  if (filled) {
+    bevel(ctx, x0, y0, w, h, true);
+    titleBar(ctx, x0 + 2, y0 + 2, w - 4, tb, a.bar, a.bar2);
+    ctx.fillStyle = '#ffffff'; ctx.fillRect(x0 + 2, y0 + tb + 3, w - 4, h - tb - 5);
+    if (size >= 18) { ctx.fillStyle = G.hi; ctx.fillRect(x0 + w - tb, y0 + 3, tb - 3, tb - 2); }
+  } else {
+    ctx.setLineDash([2, 2]); ctx.lineWidth = 1; ctx.strokeStyle = G.dark;
+    ctx.strokeRect(x0 + 0.5, y0 + 0.5, w - 1, h - 1);
+    ctx.beginPath(); ctx.moveTo(x0 + 1, y0 + tb + 1.5); ctx.lineTo(x0 + w - 1, y0 + tb + 1.5); ctx.stroke();
+  }
+  ctx.restore();
 }

@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SNAKE//SHIFT castle-room harness</title>
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; height: 100%; background: #07020f; overflow: hidden; }
+  #gl { position: fixed; left: 0; top: 0; display: block; }
+  #out {
+    position: fixed; right: 8px; top: 8px; z-index: 2; max-width: 46vw; max-height: 90vh; overflow: auto;
+    font: 11px/1.35 ui-monospace, Menlo, monospace; color: #f5e9ff; white-space: pre-wrap;
+    background: rgba(16, 4, 30, 0.82); border: 1px solid #ff3fb4; padding: 6px; border-radius: 6px;
+  }
+</style>
+</head>
+<body>
+<canvas id="gl"></canvas>
+<div id="out">loading…</div>
+<script type="module" src="./castle.js"></script>
+</body>
+</html>

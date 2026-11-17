@@ -424,3 +424,26 @@ export function create(kit) {
 
   return { frame, props, glows };
 }
+
+// Life slot (LEVELS_PLAN 4.3), plain Canvas 2D, no WebGL: a glass block. Filled = cyan glass with a
+// bright rim and a diagonal glint, rim turning neon magenta as chaos rises; hollow = the bare rim.
+export function life(ctx, x, y, size, filled, fx) {
+  const s = size * 0.76, x0 = x + (size - s) / 2, y0 = y + (size - s) / 2, r = s * 0.16;
+  const k = Math.max(0, Math.min(1, ((fx && fx.chaos) || 0) * 1.4 - 0.3));
+  const rim = `rgb(${Math.round(234 + 21 * k)},${Math.round(255 - 191 * k)},${Math.round(255 - 51 * k)})`;
+  const box = () => { ctx.beginPath(); ctx.roundRect ? ctx.roundRect(x0, y0, s, s, r) : ctx.rect(x0, y0, s, s); };
+  ctx.save();
+  box();
+  if (filled) {
+    const g = ctx.createLinearGradient(x0, y0, x0 + s, y0 + s);
+    g.addColorStop(0, 'rgba(170,245,255,0.95)'); g.addColorStop(1, 'rgba(40,150,210,0.9)');
+    ctx.fillStyle = g; ctx.fill();
+    ctx.strokeStyle = rim; ctx.lineWidth = Math.max(1, size * 0.07); ctx.stroke();
+    ctx.beginPath(); ctx.moveTo(x0 + s * 0.2, y0 + s * 0.62); ctx.lineTo(x0 + s * 0.62, y0 + s * 0.2);
+    ctx.strokeStyle = 'rgba(255,255,255,0.85)'; ctx.lineWidth = Math.max(1, size * 0.08); ctx.lineCap = 'round'; ctx.stroke();
+  } else {
+    ctx.fillStyle = 'rgba(46,246,255,0.1)'; ctx.fill();
+    ctx.strokeStyle = 'rgba(46,246,255,0.75)'; ctx.lineWidth = Math.max(1.2, size * 0.08); ctx.stroke();
+  }
+  ctx.restore();
+}

@@ -475,3 +475,31 @@ export function create(kit) {
 
   return { frame, props, glows };
 }
+
+// Life slot (LEVELS_PLAN 4.3), plain Canvas 2D, no WebGL: a mirror tile set on its corner. Filled = four
+// silver facets with a gold glint; hollow = the empty tile outline with its facet seams in gold.
+export function life(ctx, x, y, size, filled, fx) {
+  const cx = x + size / 2, cy = y + size / 2, h = size * 0.44;
+  const tile = () => { ctx.beginPath(); ctx.moveTo(cx, cy - h); ctx.lineTo(cx + h, cy); ctx.lineTo(cx, cy + h); ctx.lineTo(cx - h, cy); ctx.closePath(); };
+  ctx.save();
+  if (filled) {
+    const F = ['#f4f0ff', '#ffffff', '#8e86b8', '#b8b0d8'], P = [[0, -1], [1, 0], [0, 1], [-1, 0]];
+    for (let i = 0; i < 4; i++) {
+      const ux = cx + P[i][0] * h * 0.5, uy = cy + P[i][1] * h * 0.5, q = h * 0.5;
+      ctx.beginPath(); ctx.moveTo(ux, uy - q); ctx.lineTo(ux + q, uy); ctx.lineTo(ux, uy + q); ctx.lineTo(ux - q, uy); ctx.closePath();
+      ctx.fillStyle = F[i]; ctx.fill();
+    }
+    ctx.strokeStyle = 'rgba(44,8,40,0.8)'; ctx.lineWidth = Math.max(1, size * 0.05);
+    ctx.beginPath(); ctx.moveTo(cx - h * 0.5, cy - h * 0.5); ctx.lineTo(cx + h * 0.5, cy + h * 0.5); ctx.moveTo(cx + h * 0.5, cy - h * 0.5); ctx.lineTo(cx - h * 0.5, cy + h * 0.5); ctx.stroke();
+    tile(); ctx.stroke();
+    const sx = cx + h * 0.5, sy = cy - h * 0.55, g = size * 0.16;
+    ctx.fillStyle = '#ffb321'; ctx.beginPath();
+    ctx.moveTo(sx, sy - g); ctx.lineTo(sx + g * 0.3, sy - g * 0.3); ctx.lineTo(sx + g, sy); ctx.lineTo(sx + g * 0.3, sy + g * 0.3);
+    ctx.lineTo(sx, sy + g); ctx.lineTo(sx - g * 0.3, sy + g * 0.3); ctx.lineTo(sx - g, sy); ctx.lineTo(sx - g * 0.3, sy - g * 0.3); ctx.closePath(); ctx.fill();
+  } else {
+    tile(); ctx.strokeStyle = 'rgba(255,179,33,0.8)'; ctx.lineWidth = Math.max(1.2, size * 0.08); ctx.stroke();
+    ctx.strokeStyle = 'rgba(255,179,33,0.3)'; ctx.lineWidth = Math.max(1, size * 0.04);
+    ctx.beginPath(); ctx.moveTo(cx - h * 0.5, cy - h * 0.5); ctx.lineTo(cx + h * 0.5, cy + h * 0.5); ctx.moveTo(cx + h * 0.5, cy - h * 0.5); ctx.lineTo(cx - h * 0.5, cy + h * 0.5); ctx.stroke();
+  }
+  ctx.restore();
+}

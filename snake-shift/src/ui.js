@@ -1,5 +1,7 @@
 // DOM interface: title with the photosensitivity warning and both switches,
 // HUD themed per timeline, pause/settings panel, game over with best score.
+// Lives (LEVELS_PLAN 4.3): five slots on a small canvas, drawn with the current universe's
+// life(ctx, x, y, size, filled, fx) export, falling back to a rounded block in the HUD accent.
 // The UI only reads state and calls back into main.js.
 
 const DEFAULT_HUD = { fg: '#f4f4f4', bg: 'rgba(0,0,0,0.72)', accent: '#ff2bd6', panelFg: '#f4f4f4', panelBg: 'rgba(8,6,16,0.94)' };
@@ -13,11 +15,15 @@ export function createUI({ prefs, onPlay, onAgain, onPauseToggle, onMuteToggle, 
     hint: $('hint'), title: $('title'), paused: $('paused'), over: $('over'),
     play: $('btn-play'), resume: $('btn-resume'), again: $('btn-again'),
     overScore: $('over-score'), overBest: $('over-best'), overNew: $('over-new'),
-    loading: $('loading'), dpad: $('dpad'),
+    loading: $('loading'), dpad: $('dpad'), lives: $('lives'),
   };
   let inPlay = false; // HUD showing (ready, playing, paused)
   let touchHint = false;
-  const hintText = () => (prefs.get().dpad ? 'TAP AN ARROW TO START' : touchHint ? 'SWIPE TO START' : 'PRESS AN ARROW TO START');
+  let hintKind = 'start'; // 'start' | 'respawn'
+  const hintText = () => {
+    if (hintKind === 'respawn') return prefs.get().dpad ? 'TAP A DIRECTION' : touchHint ? 'SWIPE A DIRECTION' : 'PRESS A DIRECTION';
+    return prefs.get().dpad ? 'TAP AN ARROW TO START' : touchHint ? 'SWIPE TO START' : 'PRESS AN ARROW TO START';
+  };
   const switches = [...document.querySelectorAll('input[data-pref]')];
 
   function syncSwitches() {
@@ -48,6 +54,108 @@ export function createUI({ prefs, onPlay, onAgain, onPauseToggle, onMuteToggle, 
   function show(node, on) { node.hidden = !on; }
   function blurAll() { if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur(); }
 
+  // ---------- lives ----------
+  const lv = {
+    ctx: el.lives ? el.lives.getContext('2d') : null,
+    n: 3, max: 5, icon: null, accent: DEFAULT_HUD.accent,
+    anim: null,          // { kind: 'loss' | 'gain', slot, at }
+    drawnAt: -Infinity, dirty: true, w: 0, h: 0, dpr: 1, broken: new Set(),
+  };
+  const SLOTS = 5;
+  const ANIM_MS = { loss: 520, gain: 380 };
+
+  function fallbackIcon(ctx, x, y, size, filled) {
+    const r = size * 0.22, pad = size * 0.1;
+    const x0 = x + pad, y0 = y + pad, s = size - pad * 2;
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(x0 + r, y0);
+    ctx.arcTo(x0 + s, y0, x0 + s, y0 + s, r);
+    ctx.arcTo(x0 + s, y0 + s, x0, y0 + s, r);
+    ctx.arcTo(x0, y0 + s, x0, y0, r);
+    ctx.arcTo(x0, y0, x0 + s, y0, r);
+    ctx.closePath();
+    if (filled) { ctx.fillStyle = lv.accent; ctx.fill(); }
+    else { ctx.strokeStyle = lv.accent; ctx.globalAlpha = 0.7; ctx.lineWidth = Math.max(1, size * 0.1); ctx.stroke(); }
+    ctx.restore();
+  }
+
+  function icon(ctx, x, y, size, filled, fx) {
+    const fn = lv.icon;
+    if (fn && !lv.broken.has(fn)) {
+      ctx.save();
+      try { fn(ctx, x, y, size, filled, fx || {}); ctx.restore(); return; } catch (err) {
+        ctx.restore();
+        lv.broken.add(fn);
+        console.warn('[ui] life() icon failed; using the block', err);
+      }
+    }
+    fallbackIcon(ctx, x, y, size, filled);
+  }
+
+  function sizeLives() {
+    const c = el.lives;
+    if (!c) return false;
+    const w = c.clientWidth, h = c.clientHeight;
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    if (!w || !h) return false;
+    if (w !== lv.w || h !== lv.h || dpr !== lv.dpr) {
+      lv.w = w; lv.h = h; lv.dpr = dpr;
+      c.width = Math.round(w * dpr);
+      c.height = Math.round(h * dpr);
+    }
+    return true;
+  }
+
+  function drawLives(fx, now) {
+    const ctx = lv.ctx;
+    if (!ctx || !sizeLives()) return;
+    const rm = prefs.get().reducedMotion;
+    ctx.setTransform(lv.dpr, 0, 0, lv.dpr, 0, 0);
+    ctx.clearRect(0, 0, lv.w, lv.h);
+    const gap = Math.max(2, Math.round(lv.h * 0.14));
+    const size = Math.min(lv.h - 2, (lv.w - gap * (SLOTS - 1)) / SLOTS);
+    const y = (lv.h - size) / 2;
+    const a = lv.anim;
+    const k = a ? Math.min(1, (now - a.at) / ANIM_MS[a.kind]) : 1;
+    for (let i = 0; i < SLOTS; i++) {
+      const x = i * (size + gap);
+      const filled = i < lv.n;
+      if (a && a.slot === i && k < 1 && !rm) {
+        if (a.kind === 'gain') { // pop: the new icon overshoots and settles
+          const sc = 1 + 0.7 * Math.sin(k * Math.PI) * (1 - k * 0.4);
+          const cx = x + size / 2, cy = y + size / 2;
+          ctx.save();
+          ctx.translate(cx, cy); ctx.scale(sc, sc); ctx.translate(-cx, -cy);
+          icon(ctx, x, y, size, true, fx);
+          ctx.restore();
+          continue;
+        }
+        // loss: the slot visibly breaks; two halves fall apart over the hollow slot
+        icon(ctx, x, y, size, false, fx);
+        const off = size * 0.45 * k, drop = size * 0.5 * k * k;
+        for (const side of [-1, 1]) {
+          ctx.save();
+          ctx.globalAlpha = 1 - k;
+          ctx.beginPath();
+          ctx.rect(side < 0 ? x - size : x + size / 2, y - size, size * 1.5, size * 3);
+          ctx.clip();
+          const cx = x + size / 2, cy = y + size / 2;
+          ctx.translate(cx + side * off, cy + drop);
+          ctx.rotate(side * 0.6 * k);
+          ctx.translate(-cx, -cy);
+          icon(ctx, x, y, size, true, fx);
+          ctx.restore();
+        }
+        continue;
+      }
+      icon(ctx, x, y, size, filled, fx);
+    }
+    if (a && k >= 1) lv.anim = null;
+    lv.drawnAt = now;
+    lv.dirty = false;
+  }
+
   let lastScore = -1;
 
   return {
@@ -62,6 +170,17 @@ export function createUI({ prefs, onPlay, onAgain, onPauseToggle, onMuteToggle, 
       show(el.hud, true); show(el.hint, true);
       inPlay = true; syncSwitches();
       touchHint = !!touch;
+      hintKind = 'start';
+      el.hint.classList.remove('respawn');
+      el.hint.textContent = hintText();
+      blurAll();
+    },
+    /** A life was lost: the short snake waits for the first direction key. */
+    showRespawn(touch) {
+      show(el.paused, false); show(el.hint, true);
+      touchHint = !!touch;
+      hintKind = 'respawn';
+      el.hint.classList.add('respawn');
       el.hint.textContent = hintText();
       blurAll();
     },
@@ -103,6 +222,40 @@ export function createUI({ prefs, onPlay, onAgain, onPauseToggle, onMuteToggle, 
       root.style.setProperty('--hud-font', h.font || 'var(--mono)');
       root.dataset.timeline = info.timeline || '';
       root.dataset.view = info.view || 'board';
+      root.dataset.look = info.look || (info.kind === '2d' ? '2d' : info.view === 'pov' ? 'pov' : '3d');
+      lv.accent = h.accent;
+      lv.dirty = true;
+    },
+    /** Lives held and the change that caused it: 'loss', 'gain' or null (no animation). */
+    setLives(n, max = 5, change = null) {
+      const prev = lv.n;
+      lv.n = Math.max(0, n | 0);
+      lv.max = max;
+      if (change === 'loss' && lv.n < prev) {
+        lv.anim = { kind: 'loss', slot: Math.min(SLOTS - 1, lv.n), at: performance.now() };
+        if (el.lives && !prefs.get().reducedMotion) {
+          el.lives.classList.remove('hit');
+          void el.lives.offsetWidth;
+          el.lives.classList.add('hit');
+        }
+      } else if (change === 'gain' && lv.n > prev) {
+        lv.anim = { kind: 'gain', slot: Math.min(SLOTS - 1, lv.n - 1), at: performance.now() };
+      } else if (change === null) {
+        lv.anim = null;
+      }
+      if (el.lives) el.lives.setAttribute('aria-label', `${lv.n} of ${SLOTS} lives`);
+      lv.dirty = true;
+    },
+    /** The current universe's life() function, or null for the fallback block. */
+    setLifeIcon(fn) {
+      const next = typeof fn === 'function' ? fn : null;
+      if (next !== lv.icon) { lv.icon = next; lv.dirty = true; }
+    },
+    /** Per frame: redraw the slots while animating, on change, and a few times a second. */
+    frame(fx) {
+      if (el.hud.hidden) return;
+      const now = performance.now();
+      if (lv.dirty || lv.anim || now - lv.drawnAt > 120) drawLives(fx, now);
     },
     syncSwitches,
     error(msg) { show(el.loading, true); el.loading.textContent = msg; },

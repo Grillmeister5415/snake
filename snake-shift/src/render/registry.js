@@ -1,7 +1,8 @@
 // Loads whatever modules exist, by dynamic import, and falls back to stubs.
-// The game runs with only the LCD timeline present.
+// The game runs with only the LCD timeline present. A flat timeline and a room with the
+// same id are one universe (LEVELS_PLAN 2.1); director.js buildUniverses() joins them.
 
-import { FLAT_IDS } from '../config.js';
+import { FLAT_IDS, ROOM_IDS, OLD_ROOMS } from '../config.js';
 import { createFallbackBeat } from '../fx.js';
 
 async function tryImport(path) {
@@ -32,6 +33,18 @@ export async function loadTimelines(ids = FLAT_IDS) {
   return out;
 }
 
+/**
+ * Resolves to { [id]: module } for every room module that loaded and exports a meta.
+ * Room modules import nothing and touch no GL at load, so this works without WebGL:
+ * it gives the metas (names, weights, HUD colours) and the life() icons on every device.
+ */
+export async function loadRoomModules(ids = ROOM_IDS) {
+  const mods = await Promise.all(ids.map((id) => tryImport(`./gl/rooms/${id}.js`)));
+  const out = {};
+  ids.forEach((id, i) => { if (mods[i] && mods[i].meta) out[id] = mods[i]; });
+  return out;
+}
+
 /** Resolves to the room renderer of plan 15.3, or null. */
 export async function loadEngine(canvas, grid) {
   const mod = await tryImport('./gl/engine.js');
@@ -48,20 +61,22 @@ export async function loadEngine(canvas, grid) {
 }
 
 const noop = () => {};
+const AUDIO_METHODS = [
+  'unlock', 'setMuted', 'setTimeline', 'setChaos', 'eat', 'cut', 'die', 'start', 'stop',
+  // LEVELS_PLAN 7.5
+  'setScore', 'shift', 'setLook', 'setLives', 'lifeLost', 'lifeGained', 'respawned',
+];
 
 function stubAudio(beat) {
-  return {
-    stub: true,
-    unlock: noop, setMuted: noop, setTimeline: noop, setChaos: noop,
-    eat: noop, cut: noop, die: noop, start: noop, stop: noop,
-    beat,
-  };
+  const out = { stub: true, beat };
+  for (const k of AUDIO_METHODS) out[k] = noop;
+  return out;
 }
 
 /** Wraps every audio method so a failure there can never stop the game. */
 function safeAudio(a, beat) {
   const out = { stub: false, beat: a.beat || beat };
-  for (const k of ['unlock', 'setMuted', 'setTimeline', 'setChaos', 'eat', 'cut', 'die', 'start', 'stop']) {
+  for (const k of AUDIO_METHODS) {
     const fn = typeof a[k] === 'function' ? a[k].bind(a) : noop;
     out[k] = (...args) => {
       try { return fn(...args); } catch (err) { console.warn(`[audio] ${k} failed`, err); return undefined; }
@@ -75,35 +90,34 @@ export async function loadSound(getPrefs) {
   const [audioMod, beatMod] = await Promise.all([tryImport('../audio.js'), tryImport('../beat.js')]);
   let beat = null;
   if (beatMod && typeof beatMod.createBeat === 'function') {
-    try { beat = beatMod.createBeat({ bpm: 132 }); } catch (err) { console.warn('[registry] createBeat failed', err); }
+    try { beat = beatMod.createBeat({ bpm: 112 }); } catch (err) { console.warn('[registry] createBeat failed', err); }
   }
-  if (!beat) beat = createFallbackBeat({ bpm: 132 });
+  if (!beat) beat = createFallbackBeat({ bpm: 112 });
   let audio = null;
   if (audioMod && typeof audioMod.createAudio === 'function') {
     try { audio = safeAudio(audioMod.createAudio(getPrefs), beat); } catch (err) { console.warn('[registry] createAudio failed', err); }
   }
   if (!audio) audio = stubAudio(beat);
-  return { audio, beat: audio.beat || beat };
+  const b = audio.beat || beat;
+  if (typeof b.setBpm !== 'function') b.setBpm = noop;
+  return { audio, beat: b };
 }
 
-const ROOM_IDS = ['court', 'disco', 'plastic', 'bunker'];
-
 /**
- * Canvas 2D stand-in for the rooms when WebGL is missing or `?nogl` is set (plan 6.5).
- * Resolves to { persp, rooms } or null. Room metas come from each room module (they import
- * nothing and touch no GL at load), else from persp.js FALLBACK_ROOMS. First person falls back
- * to the board view, so these rooms only offer `views: ['board']`.
+ * Canvas 2D stand-in for the four built rooms when WebGL is missing or `?nogl` is set (plan 6.5).
+ * Resolves to { persp, rooms } or null. Room metas come from the loaded room modules, else from
+ * persp.js FALLBACK_ROOMS. First person falls back to the board view (`views: ['board']`).
+ * New universes get no stand-in: without WebGL they show only their 2D look (LEVELS_PLAN 4.1).
  */
-export async function loadPersp(grid) {
+export async function loadPersp(grid, roomMods = {}) {
   const mod = await tryImport('./persp.js');
   if (!mod || typeof mod.createPerspRenderer !== 'function') return null;
   const fallback = mod.FALLBACK_ROOMS || {};
-  const mods = await Promise.all(ROOM_IDS.map((id) => tryImport(`./gl/rooms/${id}.js`)));
   const rooms = {};
-  ROOM_IDS.forEach((id, i) => {
-    const meta = (mods[i] && mods[i].meta) || fallback[id];
+  for (const id of OLD_ROOMS) {
+    const meta = (roomMods[id] && roomMods[id].meta) || fallback[id];
     if (meta) rooms[id] = { ...meta, id, kind: '3d', views: ['board'] };
-  });
+  }
   try {
     return { persp: mod.createPerspRenderer(grid), rooms };
   } catch (err) {

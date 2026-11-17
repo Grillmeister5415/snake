@@ -570,3 +570,26 @@ export function board(ctx, L, snap, fx) {
   }
   fallbackBoard(ctx, L, snap);
 }
+
+// Life slot (LEVELS_PLAN 4.3): a cracked glass block whose two halves have slipped apart, with a
+// misregistered colour split. Filled = solid halves; hollow = the same broken outline, nothing inside.
+export function life(ctx, x, y, size, filled, fx) {
+  const s = size * 0.7, x0 = x + (size - s) / 2, y0 = y + (size - s) / 2, o = Math.max(1, size * 0.06);
+  const half = (dx, dy, upper) => {
+    ctx.beginPath();
+    if (upper) { ctx.moveTo(x0 + dx, y0 + dy); ctx.lineTo(x0 + s + dx, y0 + dy); ctx.lineTo(x0 + s + dx, y0 + s * 0.35 + dy); ctx.lineTo(x0 + dx, y0 + s * 0.62 + dy); }
+    else { ctx.moveTo(x0 + dx, y0 + s * 0.62 + dy); ctx.lineTo(x0 + s + dx, y0 + s * 0.35 + dy); ctx.lineTo(x0 + s + dx, y0 + s + dy); ctx.lineTo(x0 + dx, y0 + s + dy); }
+    ctx.closePath();
+  };
+  ctx.save();
+  ctx.lineJoin = 'miter';
+  if (filled) {
+    ctx.globalAlpha = 0.8; ctx.fillStyle = PAL[2]; half(-o, -o, true); ctx.fill(); ctx.fillStyle = PAL[0]; half(o, o, false); ctx.fill();
+    ctx.globalAlpha = 1; ctx.fillStyle = PAL[6]; half(0, -o * 0.5, true); ctx.fill(); ctx.fillStyle = PAL[1]; half(0, o * 0.5, false); ctx.fill();
+  } else {
+    ctx.lineWidth = Math.max(1.2, size * 0.075);
+    ctx.strokeStyle = PAL[0]; half(0, -o * 0.5, true); ctx.stroke();
+    ctx.strokeStyle = PAL[2]; half(0, o * 0.5, false); ctx.stroke();
+  }
+  ctx.restore();
+}

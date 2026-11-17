@@ -1,0 +1,33 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>audit harness</title>
+<link rel="icon" href="data:,">
+<style>
+  :root { color-scheme: dark; }
+  html, body { margin: 0; background: #101014; color: #e8e8f0; font: 12px/1.35 ui-monospace, Menlo, monospace; }
+  #ui { position: sticky; top: 0; z-index: 2; background: rgba(16,16,20,0.94); padding: 8px; border-bottom: 1px solid #333; }
+  #ui button, #ui select { font: inherit; margin: 2px; padding: 3px 7px; background: #22222a; color: #e8e8f0; border: 1px solid #555; border-radius: 4px; cursor: pointer; }
+  #out { white-space: pre-wrap; margin: 4px 0 0; max-height: 34vh; overflow: auto; color: #ffd27a; }
+  #grid { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px; }
+  figure { margin: 0; background: #000; border: 1px solid #333; }
+  figcaption { padding: 2px 4px; color: #9ab; }
+  figure canvas { display: block; }
+  #icons { padding: 8px; }
+  #gl { position: fixed; left: -4000px; top: 0; }
+</style>
+</head>
+<body>
+<div id="ui">
+  case <select id="case"></select> fx <select id="fx"></select>
+  <button id="render">render</button><button id="check">check (C)</button><button id="iconsBtn">icons</button>
+  <div id="out">loading…</div>
+</div>
+<div id="grid"></div>
+<div id="icons"></div>
+<canvas id="gl" width="640" height="400"></canvas>
+<script type="module" src="./audit.js"></script>
+</body>
+</html>

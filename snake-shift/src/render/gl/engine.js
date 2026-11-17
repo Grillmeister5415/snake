@@ -165,7 +165,9 @@ async function build(canvas, opts) {
       continue;
     }
     loaded[id] = { id, progs, inst };
-    rooms[id] = Object.freeze({ ...mod.meta, id, kind: '3d', views: ['board', 'pov'] });
+    // castle-room: a room may declare meta.views (e.g. ['board'] for the cube); default both views as before
+    const views = Array.isArray(mod.meta.views) && mod.meta.views.length ? mod.meta.views.slice() : ['board', 'pov'];
+    rooms[id] = Object.freeze({ ...mod.meta, id, kind: '3d', views });
   }
   const firstId = Object.keys(loaded)[0];
   if (!firstId) return null;
@@ -221,6 +223,7 @@ async function build(canvas, opts) {
       cutAge: num(f.cutAge, 1e9),
       reducedFlash: !!f.reducedFlash,
       reducedMotion: !!f.reducedMotion,
+      calm: !!f.calm, // added by castle-room (LEVELS_PLAN 4.2): calm universe showing
     };
   }
 
@@ -760,6 +763,7 @@ async function build(canvas, opts) {
     gl.useProgram(glowProg.prog);
     gl.uniformMatrix4fv(glowProg.u.uViewProj, false, VP);
     gl.uniform1f(glowProg.u.uGTime, uFx[0]);
+    if (glowProg.u.uGCalm) gl.uniform1f(glowProg.u.uGCalm, fx.calm ? 1 : 0); // bite beam + pov beacon ripple
 
     const pp = postParams(fx, fxIn);
     const buffered = !!pp && postDbg.mode === 'buffer' && post.begin(canvas.width, canvas.height);
@@ -776,8 +780,7 @@ async function build(canvas, opts) {
     const P = room.progs;
     setRoomUniforms(P.sky, Fr, fx);
     const { f, r, u } = cam.b;
-    gl.uniform3f(P.sky.u.uCamF, f[0], f[1], f[2]);
-    gl.uniform3f(P.sky.u.uCamR, r[0] * cam.tanX, r[1] * cam.tanX, r[2] * cam.tanX);
+    gl.uniform3f(P.sky.u.uCamF, f[0], f[1], f[2]);    gl.uniform3f(P.sky.u.uCamR, r[0] * cam.tanX, r[1] * cam.tanX, r[2] * cam.tanX);
     gl.uniform3f(P.sky.u.uCamU, u[0] * cam.tanY, u[1] * cam.tanY, u[2] * cam.tanY);
     gl.disable(gl.DEPTH_TEST);
     gl.disable(gl.BLEND);

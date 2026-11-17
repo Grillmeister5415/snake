@@ -10,9 +10,10 @@ export function createFallbackBeat({ bpm = 132 } = {}) {
   let source = () => (typeof performance !== 'undefined' ? performance.now() : Date.now()) / 1000;
   let t0 = 0;
   let running = false;
-  const period = 60 / bpm;
+  let period = 60 / bpm;
   const beat = {
-    bpm,
+    get bpm() { return 60 / period; },
+    setBpm(v) { if (v > 0 && Number.isFinite(v)) period = 60 / Math.max(20, Math.min(400, v)); },
     get running() { return running; },
     setTimeSource(fn) { if (typeof fn === 'function') source = fn; },
     start() { if (!running) { running = true; t0 = source(); } },
@@ -25,16 +26,20 @@ export function createFallbackBeat({ bpm = 132 } = {}) {
 }
 
 /**
- * createFx() -> { frame({ now, director, beat, prefs }) -> fx }
+ * createFx() -> { frame({ now, director, beat, prefs, snap }) -> fx }
  *   director: director.get() result; beat: createBeat()-like object; prefs: { reducedFlash, reducedMotion }
+ *   snap: the simulation snapshot (lives, universe, rules)
  * Extra fields beyond 15.3 (additive): strobe, invert, glitch, split, scene, prev, view, timeline, kind.
+ * LEVELS_PLAN 4.2: lives, maxLives, universe, look, calm, rules, waiting.
+ * Calm universes (lcd, abyss): no strobe, inversion, glitch or colour split; beat pulse capped at 15%.
  */
 export function createFx() {
   let lastNow = null;
   let time = 0;
 
-  function frame({ now, director: d, beat, prefs }) {
+  function frame({ now, director: d, beat, prefs, snap = null }) {
     const rf = !!prefs.reducedFlash;
+    const calm = !!(d && d.calm);
     const rm = !!prefs.reducedMotion;
     const dt = lastNow === null ? 0 : Math.max(0, Math.min(100, now - lastNow));
     lastNow = now;
@@ -55,6 +60,7 @@ export function createFx() {
       } catch { pulse = 0; }
     }
     if (rf) pulse = Math.min(pulse * FX.reducedFlashBeat, FX.reducedFlashBeat);
+    if (calm) pulse = Math.min(pulse, FX.calmBeat);
 
     const biteAge = d && Number.isFinite(d.biteAt) ? Math.max(0, now - d.biteAt) : Infinity;
     const cutAge = d ? Math.max(0, now - d.cutAt) : Infinity;
@@ -62,7 +68,7 @@ export function createFx() {
     const punch = rf || !Number.isFinite(biteAge) ? 0 : Math.pow(clamp01(1 - biteAge / FX.punchMs), 2);
 
     let strobe = 0;
-    if (!rf && d && d.strobe) {
+    if (!rf && !calm && d && d.strobe) {
       const s = d.strobe;
       const t = now - s.at;
       if (t >= 0 && t < s.dur) {
@@ -70,10 +76,10 @@ export function createFx() {
         strobe = Math.floor(t / half) % 2 === 0 ? 1 : 0;
       }
     }
-    const invert = !rf && !!d && now < d.invertUntil;
+    const invert = !rf && !calm && !!d && now < d.invertUntil;
     const cutKick = clamp01(1 - cutAge / 350);
-    const glitch = rf ? 0 : clamp01(chaos * (0.22 + 0.78 * Math.max(punch, cutKick, pulse * 0.45)));
-    const split = rf ? 0 : chaos * 7 * (0.3 + 0.7 * Math.max(punch, pulse));
+    const glitch = rf || calm ? 0 : clamp01(chaos * (0.22 + 0.78 * Math.max(punch, cutKick, pulse * 0.45)));
+    const split = rf || calm ? 0 : chaos * 7 * (0.3 + 0.7 * Math.max(punch, pulse));
 
     return {
       now,
@@ -95,6 +101,14 @@ export function createFx() {
       view: d ? d.view : 'board',
       timeline: d ? d.timeline : null,
       kind: d ? d.kind : '2d',
+      // LEVELS_PLAN 4.2
+      lives: snap ? snap.lives : 0,
+      maxLives: snap ? snap.maxLives : 5,
+      universe: snap && snap.universe ? snap.universe.id : (d ? d.timeline : null),
+      look: d ? (d.look || (d.kind === '2d' ? '2d' : d.view === 'pov' ? 'pov' : '3d')) : '2d',
+      calm,
+      rules: snap && snap.universe ? snap.universe.rules : 'box',
+      waiting: snap ? snap.waiting || null : null,
     };
   }
 

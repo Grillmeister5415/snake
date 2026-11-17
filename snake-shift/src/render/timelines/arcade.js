@@ -38,9 +38,10 @@ function layer(slot, key, w, h, dpr, paint) {
   return c;
 }
 const blit = (ctx, c, x, y, dpr) => ctx.drawImage(c, x, y, c.width / dpr, c.height / dpr);
+// Gap-safe (LEVELS_PLAN 3.3): the neck only counts when snake[0] and snake[1] are joined (no break at 0).
 function headDir(snap) {
   const s = snap.snake;
-  if (s && s.length > 1) {
+  if (s && s.length > 1 && !(snap.breaks && snap.breaks[0] === 0)) {
     const dx = X(s[0]) - X(s[1]), dy = Y(s[0]) - Y(s[1]);
     if (Math.abs(dx) + Math.abs(dy) === 1) return [dx, dy];
   }
@@ -414,7 +415,9 @@ export function drawSnake(ctx, L, snap, fxIn) {
   if (!s || !s.length) return;
   const c = L.cell, n = s.length, dead = snap.alive === false, P = dead ? DEAD : LIVE;
   const g = Math.max(1, Math.round(c * 0.08)), b = Math.max(1, Math.round(c * 0.12)), tail = Math.round(c * 0.17);
-  const cells = (fn) => { ctx.beginPath(); for (let i = 1; i < n; i++) { const ins = i === n - 1 && n > 2 ? tail : g; fn(L.bx + X(s[i]) * c + ins, L.by + Y(s[i]) * c + ins, c - 2 * ins); } };
+  // every cell is its own block; the small tail block only when the real tail is on the board
+  const tailAt = n > 2 && !(snap.length > n) ? n - 1 : -1;
+  const cells = (fn) => { ctx.beginPath(); for (let i = 1; i < n; i++) { const ins = i === tailAt ? tail : g; fn(L.bx + X(s[i]) * c + ins, L.by + Y(s[i]) * c + ins, c - 2 * ins); } };
   ctx.save();
   if (!dead) { ctx.globalAlpha = 0.16; ctx.fillStyle = P.body; ctx.beginPath(); for (let i = 0; i < n; i++) ctx.rect(L.bx + X(s[i]) * c, L.by + Y(s[i]) * c, c, c); ctx.fill(); ctx.globalAlpha = 1; }
   cells((x, y, z) => ctx.rect(x, y, z, z)); ctx.fillStyle = P.body; ctx.fill();
@@ -434,6 +437,27 @@ export function drawSnake(ctx, L, snap, fxIn) {
       const q = Math.max(1, Math.round(e * 0.4));
       ctx.fillStyle = '#ffffff'; ctx.fillRect(Math.round(ex - q / 2 + d[0] * e * 0.25), Math.round(ey - e * 0.45 + d[1] * e * 0.25), q, q);
     }
+  }
+  ctx.restore();
+}
+
+// Life slot (LEVELS_PLAN 4.3): a sprite head, the snake's own front-rounded yellow block with eyes,
+// facing right. Filled = lit sprite; hollow = the same outline in dim neon with no fill.
+export function life(ctx, x, y, size, filled, fx) {
+  const s = Math.round(size * 0.82), x0 = x + (size - s) / 2, y0 = y + (size - s) / 2, d = [1, 0];
+  ctx.save();
+  ctx.beginPath(); rrect(ctx, x0, y0, s, s, frontRadii(d, s * 0.42, s * 0.12));
+  if (filled) {
+    ctx.fillStyle = LIVE.head; ctx.fill();
+    ctx.fillStyle = LIVE.lo; ctx.fillRect(x0 + s * 0.08, y0 + s * 0.82, s * 0.6, s * 0.1);
+    ctx.fillStyle = LIVE.eye;
+    const e = Math.max(2, Math.round(s * 0.17));
+    for (const sg of [-1, 1]) ctx.fillRect(Math.round(x0 + s * 0.6 - e / 2), Math.round(y0 + s / 2 + sg * s * 0.21 - e * 0.7), e, Math.round(e * 1.4));
+  } else {
+    ctx.strokeStyle = hexA(LIVE.body, 0.62); ctx.lineWidth = Math.max(1.5, size * 0.1); ctx.stroke();
+    ctx.fillStyle = hexA('#00f0ff', 0.55);
+    const e = Math.max(1, Math.round(s * 0.12));
+    for (const sg of [-1, 1]) ctx.fillRect(Math.round(x0 + s * 0.6 - e / 2), Math.round(y0 + s / 2 + sg * s * 0.21 - e / 2), e, e);
   }
   ctx.restore();
 }

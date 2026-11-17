@@ -388,3 +388,23 @@ export function create(kit) {
 
   return { frame, props, glows };
 }
+
+// Life slot (LEVELS_PLAN 4.3), plain Canvas 2D, no WebGL: a chrome bead. Filled = mirrored sphere with
+// a sky-blue band, dark horizon and a hard white highlight; hollow = an empty chrome ring.
+export function life(ctx, x, y, size, filled, fx) {
+  const cx = x + size / 2, cy = y + size / 2, r = size * 0.4, TAU = Math.PI * 2;
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU);
+  if (filled) {
+    const g = ctx.createLinearGradient(cx, cy - r, cx, cy + r);
+    g.addColorStop(0, '#f4fbff'); g.addColorStop(0.42, '#8fb6ff'); g.addColorStop(0.5, '#1c2450');
+    g.addColorStop(0.62, '#4a5aa0'); g.addColorStop(1, '#e6f0ff');
+    ctx.fillStyle = g; ctx.fill();
+    ctx.strokeStyle = 'rgba(16,20,48,0.85)'; ctx.lineWidth = Math.max(1, size * 0.05); ctx.stroke();
+    ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.ellipse(cx - r * 0.35, cy - r * 0.45, r * 0.26, r * 0.15, -0.6, 0, TAU); ctx.fill();
+  } else {
+    ctx.strokeStyle = 'rgba(230,240,255,0.75)'; ctx.lineWidth = Math.max(1.2, size * 0.09); ctx.stroke();
+    ctx.fillStyle = 'rgba(255,255,255,0.6)'; ctx.beginPath(); ctx.arc(cx - r * 0.45, cy - r * 0.45, Math.max(0.8, r * 0.12), 0, TAU); ctx.fill();
+  }
+  ctx.restore();
+}

@@ -124,9 +124,11 @@ function drawDot(ctx, L, snap, fx) {
   ctx.restore();
 }
 
+// Gap-safe (LEVELS_PLAN 3.3): the neck only counts when no break splits snake[0] from snake[1].
+const split = (snap, i) => !!(snap.breaks && snap.breaks.includes(i));
 function headDir(snap) {
   const s = snap.snake;
-  if (s.length > 1) { const dx = X(s[0]) - X(s[1]), dy = Y(s[0]) - Y(s[1]); if (Math.abs(dx) + Math.abs(dy) === 1) return [dx, dy]; }
+  if (s.length > 1 && !split(snap, 0)) { const dx = X(s[0]) - X(s[1]), dy = Y(s[0]) - Y(s[1]); if (Math.abs(dx) + Math.abs(dy) === 1) return [dx, dy]; }
   return DIRS[snap.dir] || [1, 0];
 }
 
@@ -143,7 +145,7 @@ export function drawSnake(ctx, L, snap, fxIn) {
   ctx.fillStyle = P.lo;
   for (let i = 1; i < s.length; i++) {
     const a = s[i], b = s[i - 1], dx = X(b) - X(a), dy = Y(b) - Y(a);
-    if (Math.abs(dx) + Math.abs(dy) !== 1) continue;
+    if (Math.abs(dx) + Math.abs(dy) !== 1 || split(snap, i - 1)) continue;   // no bridge across a gap
     const mx = L.bx + (X(a) + 0.5 + dx * 0.5) * c, my = L.by + (Y(a) + 0.5 + dy * 0.5) * c;
     if (dx) ctx.fillRect(Math.round(mx - p - 1), Math.round(my - bw / 2), 2 * p + 2, bw);
     else ctx.fillRect(Math.round(mx - bw / 2), Math.round(my - p - 1), bw, 2 * p + 2);
@@ -615,5 +617,26 @@ export function scenery(ctx, L, snap, fxIn) {
   }
   const top = hud(ctx, L, fx, snap, pal);
   popText(ctx, L, fx, snap, st, top);
+  ctx.restore();
+}
+
+// Life slot (LEVELS_PLAN 4.3): a fight-bar pip, a slanted bevelled block from a health bar.
+// Filled = hot yellow pip with highlight and shade; hollow = the empty pip outline over a dark well.
+export function life(ctx, x, y, size, filled, fx) {
+  const w = size * 0.84, h = size * 0.56, k = size * 0.16, x0 = x + (size - w) / 2, y0 = y + (size - h) / 2;
+  const pip = () => { ctx.beginPath(); ctx.moveTo(x0 + k, y0); ctx.lineTo(x0 + w, y0); ctx.lineTo(x0 + w - k, y0 + h); ctx.lineTo(x0, y0 + h); ctx.closePath(); };
+  ctx.save();
+  pip();
+  if (filled) {
+    ctx.fillStyle = '#ffd21f'; ctx.fill();
+    ctx.save(); ctx.clip();
+    ctx.fillStyle = '#fff6b8'; ctx.fillRect(x0, y0, w, h * 0.28);
+    ctx.fillStyle = '#e0671a'; ctx.fillRect(x0, y0 + h * 0.74, w, h * 0.26);
+    ctx.restore();
+    pip(); ctx.strokeStyle = '#000000'; ctx.lineWidth = Math.max(1, size * 0.07); ctx.stroke();
+  } else {
+    ctx.fillStyle = 'rgba(0,0,0,0.4)'; ctx.fill();
+    ctx.strokeStyle = 'rgba(255,210,31,0.7)'; ctx.lineWidth = Math.max(1.2, size * 0.08); ctx.stroke();
+  }
   ctx.restore();
 }

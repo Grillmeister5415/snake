@@ -37,9 +37,14 @@ function layer(slot, key, w, h, dpr, paint) {
   return c;
 }
 const blit = (ctx, c, x, y, dpr) => ctx.drawImage(c, x, y, c.width / dpr, c.height / dpr);
+// Gap-safe (LEVELS_PLAN 3.3): two cells are joined only when adjacent and not split by snap.breaks.
+const joined = (snap, i) => {
+  const s = snap.snake, a = s[i], b = s[i + 1];
+  return !!(a && b) && !(snap.breaks && snap.breaks.includes(i)) && Math.abs(X(a) - X(b)) + Math.abs(Y(a) - Y(b)) === 1;
+};
 function headDir(snap) {
   const s = snap.snake;
-  if (s && s.length > 1) {
+  if (s && s.length > 1 && joined(snap, 0)) {
     const dx = X(s[0]) - X(s[1]), dy = Y(s[0]) - Y(s[1]);
     if (Math.abs(dx) + Math.abs(dy) === 1) return [dx, dy];
   }
@@ -377,9 +382,14 @@ export function drawSnake(ctx, L, snap, fxIn) {
   if (!s || !s.length) return;
   const fx = norm(fxIn), dpr = dprOf(ctx), c = L.cell, n = s.length, dead = snap.alive === false, S = segs(c, dpr, dead);
   ctx.save();
+  // each segment's stripe runs along a joined neighbour (the one ahead, else behind, else the heading);
+  // the small tail segment only when the real tail is on the board, so a cut-off body ends plainly
+  const tailAt = n > 2 && !(snap.length > n) ? n - 1 : -1, hd = DIRS[snap.dir] || [1, 0];
   for (let i = n - 1; i >= 1; i--) {
-    const a = s[i], b = s[i - 1], spr = (Y(a) === Y(b) ? S.H : S.V)[i & 1], x = L.bx + X(a) * c, y = L.by + Y(a) * c;
-    if (i === n - 1 && n > 2) ctx.drawImage(spr, x + c * 0.1, y + c * 0.1, c * 0.8, c * 0.8);
+    const a = s[i], b = joined(snap, i - 1) ? s[i - 1] : joined(snap, i) ? s[i + 1] : null;
+    const horiz = b ? Y(a) === Y(b) : hd[1] === 0;
+    const spr = (horiz ? S.H : S.V)[i & 1], x = L.bx + X(a) * c, y = L.by + Y(a) * c;
+    if (i === tailAt) ctx.drawImage(spr, x + c * 0.1, y + c * 0.1, c * 0.8, c * 0.8);
     else ctx.drawImage(spr, x, y, c, c);
   }
   const P = dead ? DEAD : LIVE, h = s[0], d = headDir(snap), p = [-d[1], d[0]];
@@ -427,5 +437,27 @@ function deathMark(ctx, L, snap) {
   ctx.beginPath(); ctx.moveTo(px - s, py - s); ctx.lineTo(px + s, py + s); ctx.moveTo(px + s, py - s); ctx.lineTo(px - s, py + s);
   ctx.strokeStyle = C.cream; ctx.lineWidth = Math.max(3, c * 0.17); ctx.stroke();
   ctx.strokeStyle = C.red; ctx.lineWidth = Math.max(2, c * 0.09); ctx.stroke();
+  ctx.restore();
+}
+
+// Life slot (LEVELS_PLAN 4.3): a screen-printed flower. Filled = pink petals, lemon heart, plum ink;
+// hollow = the petals drawn as a plum outline only, with an empty heart.
+export function life(ctx, x, y, size, filled, fx) {
+  const cx = x + size / 2, cy = y + size / 2, R = size * 0.46, pr = R * 0.36, k = 6;
+  ctx.save();
+  ctx.beginPath();
+  for (let i = 0; i < k; i++) {
+    const a = (i / k) * TAU - Math.PI / 2, px = cx + Math.cos(a) * (R - pr), py = cy + Math.sin(a) * (R - pr);
+    ctx.moveTo(px + pr, py); ctx.arc(px, py, pr, 0, TAU);
+  }
+  if (filled) {
+    ctx.fillStyle = C.pink; ctx.fill();
+    ctx.strokeStyle = C.plum; ctx.lineWidth = Math.max(1, size * 0.05); ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy, R * 0.42, 0, TAU); ctx.fillStyle = C.lemon; ctx.fill(); ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy, R * 0.15, 0, TAU); ctx.fillStyle = C.orange; ctx.fill();
+  } else {
+    ctx.strokeStyle = C.plum; ctx.globalAlpha = 0.75; ctx.lineWidth = Math.max(1.2, size * 0.07); ctx.stroke();
+    ctx.beginPath(); ctx.arc(cx, cy, R * 0.18, 0, TAU); ctx.stroke();
+  }
   ctx.restore();
 }

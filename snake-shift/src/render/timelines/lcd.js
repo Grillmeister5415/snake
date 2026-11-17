@@ -171,8 +171,11 @@ export function board(ctx, L, snap, fx) {
     px(ctx, cx - p / 2, cy - p / 2 + p, p, p);
   }
 
-  const snake = snap.snake;
+  const snake = snap.snake || [];
   const dead = !snap.alive;
+  // Gap-safe (LEVELS_PLAN 3.3): every cell is its own block, nothing joins two cells. The small tail
+  // block only marks the real tail; when the body runs on off the board, its last visible cell is plain.
+  const tailOn = !(snap.length > snake.length);
   const lw = Math.max(1, Math.round(cell * 0.12));
   ctx.fillStyle = INK;
   ctx.strokeStyle = INK;
@@ -181,7 +184,7 @@ export function board(ctx, L, snap, fx) {
   // Body (tail is a smaller block, so head, body and tail differ by shape).
   for (let i = snake.length - 1; i >= 1; i--) {
     const c = snake[i];
-    const tail = i === snake.length - 1;
+    const tail = i === snake.length - 1 && tailOn;
     const k = tail ? Math.max(ins, Math.round(cell * 0.22)) : ins;
     const x = bx + c.x * cell + k, y = by + c.y * cell + k, s = cell - 2 * k;
     if (dead) {
@@ -193,6 +196,12 @@ export function board(ctx, L, snap, fx) {
 
   // Head: a block with an eye and a notched mouth facing the direction of travel.
   const h = snake[0];
+  if (h) drawHead(ctx, snap, L, h, ins, lw, dead);
+  bite(ctx, L, fx);
+}
+
+function drawHead(ctx, snap, L, h, ins, lw, dead) {
+  const { cell, bx, by } = L;
   const hx = bx + h.x * cell + ins, hy = by + h.y * cell + ins, hs = cell - 2 * ins;
   const d = { up: [0, -1], down: [0, 1], left: [-1, 0], right: [1, 0] }[snap.dir] || [1, 0];
   if (dead) {
@@ -217,8 +226,11 @@ export function board(ctx, L, snap, fx) {
     px(ctx, mx - rw / 2, my - rh / 2, rw, rh);
     ctx.fillStyle = INK;
   }
+}
 
-  // Bite: a calm, stepped pixel burst at the bitten cell.
+// Bite: a calm, stepped pixel burst at the bitten cell.
+function bite(ctx, L, fx) {
+  const { cell, bx, by, bw, bh } = L;
   if (fx && fx.bite && fx.biteAge < 360) {
     const stepN = 1 + Math.floor(fx.biteAge / 90);
     const p = Math.max(2, Math.round(cell * 0.16));
@@ -235,4 +247,23 @@ export function board(ctx, L, snap, fx) {
     }
     ctx.restore();
   }
+}
+
+// Life slot (LEVELS_PLAN 4.3): an LCD pixel block. Filled = a lit block with a pale bevel pixel;
+// hollow = an unlit ghost block inside a block outline. Pixel-snapped, calm, ignores fx.
+export function life(ctx, x, y, size, filled, fx) {
+  const s = Math.max(6, Math.round(size * 0.74)), x0 = Math.round(x + (size - s) / 2), y0 = Math.round(y + (size - s) / 2);
+  const t = Math.max(2, Math.round(size * 0.14));
+  ctx.save();
+  if (filled) {
+    ctx.fillStyle = INK; ctx.fillRect(x0, y0, s, s);
+    const q = Math.max(1, Math.round(s * 0.18));
+    ctx.fillStyle = SCREEN; ctx.fillRect(x0 + t, y0 + t, q, q);
+  } else {
+    ctx.fillStyle = 'rgba(31, 42, 25, 0.12)'; ctx.fillRect(x0, y0, s, s);
+    ctx.fillStyle = INK;
+    ctx.fillRect(x0, y0, s, t); ctx.fillRect(x0, y0 + s - t, s, t);
+    ctx.fillRect(x0, y0 + t, t, s - 2 * t); ctx.fillRect(x0 + s - t, y0 + t, t, s - 2 * t);
+  }
+  ctx.restore();
 }

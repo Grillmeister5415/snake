@@ -518,3 +518,24 @@ export function create(kit) {
 
   return { frame, props, glows };
 }
+
+// Life slot (LEVELS_PLAN 4.3), plain Canvas 2D, no WebGL: a caged red warning lamp. Filled = lit lamp
+// with a hot core behind cage bars; hollow = a dead lamp, only its rim and cage in dim red.
+export function life(ctx, x, y, size, filled, fx) {
+  const cx = x + size / 2, cy = y + size * 0.54, r = size * 0.36, TAU = Math.PI * 2;
+  ctx.save();
+  ctx.fillStyle = filled ? '#3a3330' : 'rgba(80,70,66,0.7)';
+  ctx.fillRect(cx - r * 0.55, y + size * 0.04, r * 1.1, Math.max(1, size * 0.12));
+  ctx.beginPath(); ctx.arc(cx, cy, r, 0, TAU);
+  if (filled) {
+    const g = ctx.createRadialGradient(cx - r * 0.2, cy - r * 0.25, r * 0.08, cx, cy, r);
+    g.addColorStop(0, '#fff0e0'); g.addColorStop(0.35, '#ff3a20'); g.addColorStop(1, '#7a0a04');
+    ctx.fillStyle = g; ctx.fill();
+    ctx.strokeStyle = '#1a0606'; ctx.lineWidth = Math.max(1, size * 0.06); ctx.stroke();
+  } else {
+    ctx.strokeStyle = 'rgba(255,26,16,0.6)'; ctx.lineWidth = Math.max(1.2, size * 0.08); ctx.stroke();
+  }
+  ctx.strokeStyle = filled ? 'rgba(26,6,6,0.75)' : 'rgba(255,26,16,0.35)'; ctx.lineWidth = Math.max(1, size * 0.05);
+  ctx.beginPath(); ctx.moveTo(cx, cy - r); ctx.lineTo(cx, cy + r); ctx.moveTo(cx - r, cy); ctx.lineTo(cx + r, cy); ctx.stroke();
+  ctx.restore();
+}

@@ -251,8 +251,10 @@ function portalSnake(ctx, L, snap) {
   const c = L.cell, n = s.length, dead = snap.alive === false, P = dead ? PDEAD : PORTAL;
   const g = Math.max(1, Math.round(c * 0.09)), k = Math.round(c * 0.34), tl = Math.round(c * 0.17);
   ctx.save();
+  // gap-safe (LEVELS_PLAN 3.3): every cell is its own block; the small tail block only marks the real tail
+  const tailAt = n > 2 && !(snap.length > n) ? n - 1 : -1;
   ctx.fillStyle = P.body; ctx.beginPath();
-  for (let i = 1; i < n; i++) { const t = i === n - 1 && n > 2 ? tl : g; ctx.rect(L.bx + X(s[i]) * c + t, L.by + Y(s[i]) * c + t, c - 2 * t, c - 2 * t); }
+  for (let i = 1; i < n; i++) { const t = i === tailAt ? tl : g; ctx.rect(L.bx + X(s[i]) * c + t, L.by + Y(s[i]) * c + t, c - 2 * t, c - 2 * t); }
   ctx.fill();
   ctx.fillStyle = P.core; ctx.beginPath();
   for (let i = 1; i < n; i++) ctx.rect(L.bx + X(s[i]) * c + k, L.by + Y(s[i]) * c + k, c - 2 * k, c - 2 * k);
@@ -274,5 +276,30 @@ function portalSnake(ctx, L, snap) {
     ctx.lineTo(cx + d[0] * c * 0.04 - p[0] * c * 0.27, cy + d[1] * c * 0.04 - p[1] * c * 0.27);
     ctx.closePath(); ctx.fill();
   }
+  ctx.restore();
+}
+
+// Life slot (LEVELS_PLAN 4.3): an hourglass on the portal plate. Filled = red frame with neon sand in
+// both bulbs; hollow = the empty glass outline. The skins it borrows (arcade, acid) keep their own icons.
+export function life(ctx, x, y, size, filled, fx) {
+  const cx = x + size / 2, top = y + size * 0.1, bot = y + size * 0.9, hw = size * 0.34, nk = size * 0.06, cy = y + size / 2;
+  const glass = () => {
+    ctx.beginPath();
+    ctx.moveTo(cx - hw, top); ctx.lineTo(cx + hw, top); ctx.lineTo(cx + nk, cy); ctx.lineTo(cx + hw, bot);
+    ctx.lineTo(cx - hw, bot); ctx.lineTo(cx - nk, cy); ctx.closePath();
+  };
+  ctx.save();
+  ctx.lineJoin = 'round';
+  glass();
+  if (filled) {
+    ctx.fillStyle = PORTAL.body; ctx.fill();
+    ctx.fillStyle = PORTAL.core; ctx.beginPath(); ctx.moveTo(cx - hw * 0.5, top + size * 0.1); ctx.lineTo(cx + hw * 0.5, top + size * 0.1); ctx.lineTo(cx, cy - size * 0.06); ctx.closePath(); ctx.fill();
+    glass(); ctx.strokeStyle = '#ff1f4b'; ctx.lineWidth = Math.max(1.2, size * 0.09); ctx.stroke();
+  } else {
+    ctx.strokeStyle = 'rgba(255,31,75,0.8)'; ctx.lineWidth = Math.max(1.2, size * 0.08); ctx.stroke();
+  }
+  ctx.fillStyle = filled ? '#ffffff' : 'rgba(255,255,255,0.6)';
+  ctx.fillRect(cx - hw - size * 0.04, top - size * 0.06, 2 * hw + size * 0.08, Math.max(1, size * 0.07));
+  ctx.fillRect(cx - hw - size * 0.04, bot - size * 0.01, 2 * hw + size * 0.08, Math.max(1, size * 0.07));
   ctx.restore();
 }
