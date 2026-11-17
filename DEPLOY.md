@@ -1,6 +1,6 @@
 # Deploying SNAKE//SHIFT
 
-**State on 17 November 2026:** the game's files are on the droplet and tested there in private. The site is **not public yet**. Tichu's Caddy needs an entry for `snake.online-tichu.com`; that change is written and waits as [Tichu pull request 160](https://github.com/Grillmeister5415/tichu/pull/160) (Tichu task T407, decision 0104) for the owner's merge and release (see [First go-live](#first-go-live)).
+**State on 17 November 2026:** live at `https://snake.online-tichu.com` since 08:50 UTC. Tichu's Caddy passes the address on to Snake's container (Tichu task T407, decision 0104, [pull request 160](https://github.com/Grillmeister5415/tichu/pull/160), released as Tichu's release 46).
 
 | | |
 |---|---|
@@ -83,11 +83,11 @@ Switches back to the release before the current one.
 |---|---|---|
 | DNS record for `snake.online-tichu.com` | owner | done |
 | Upload the files, test them on the droplet in private | Snake | done, 17 November 2026 |
-| Caddy entry for the host, and a Tichu decision that lets `snake` join `caddy-edge` | **Tichu** | **pull request open**: [tichu#160](https://github.com/Grillmeister5415/tichu/pull/160) (T407, decision 0104). The owner merges; the release (recreating Tichu's Caddy, a few seconds offline) needs the owner's yes. Background: [deploy/TICHU_CADDY_REQUEST.md](deploy/TICHU_CADDY_REQUEST.md) |
-| Start the container: `deploy/deploy.sh --start` | Snake | open, only after the pull request above is merged |
-| Checks below | Snake | open |
+| Caddy entry for the host, and a Tichu decision that lets `snake` join `caddy-edge` | **Tichu** | done, 17 November 2026: [tichu#160](https://github.com/Grillmeister5415/tichu/pull/160) (T407, decision 0104), merged and released on the owner's yes as Tichu's release 46. Only Tichu's Caddy was recreated (about 6 to 9 seconds offline, nobody playing). Background: [deploy/TICHU_CADDY_REQUEST.md](deploy/TICHU_CADDY_REQUEST.md) |
+| Start the container: `deploy/deploy.sh --start` | Snake | done, 17 November 2026, 08:50 UTC |
+| Checks below | Snake | done, all passed |
 
-The container is deliberately not running yet. Tichu's runbook says `caddy-edge` holds Caddy and `unser-jahr` and nothing else, and its release check lists the members. Joining before Tichu's documents allow it would break that check.
+The container was started only after Tichu's decision 0104 was merged. Before that, Tichu's runbook said `caddy-edge` holds Caddy and `unser-jahr` and nothing else, and joining earlier would have broken that rule. Since decision 0104 the network may hold three members: Caddy, `unser-jahr` and `snake`. A fourth needs a new Tichu decision.
 
 ## Checks after go-live
 
@@ -122,7 +122,14 @@ A throwaway container on the droplet, with the same image and settings as `compo
 - Through an SSH tunnel, the game ran 60 seconds on autopilot in a browser: 13 universes, 3D included, no blocked request and no error.
 - The container used 13 MB of memory.
 
-Not tested: the public address, the certificate, and the path through Tichu's Caddy. Those exist only after go-live.
+After go-live the same day, from outside the droplet:
+
+- `https://snake.online-tichu.com/` answers `200` over HTTP/2 with all headers above; plain http redirects to https. The certificate is Let's Encrypt's, valid to 15 February 2027; Tichu's Caddy renews it by itself.
+- In a browser the game ran 45 seconds on autopilot from the public address: 14 universes, 3D included, no blocked request and no error.
+- Tichu (`www`, the bare domain's redirect, `/intro`, `/health/live`) and Unser Jahr (`reflect`) answer as before.
+- `caddy-edge` holds exactly `snake`, `unser-jahr` and Tichu's Caddy. From inside `snake`, none of Tichu's containers can be found by name.
+
+Not tested: play by hand on the public address, and sound there.
 
 ## Good to know
 
