@@ -4,12 +4,12 @@
 
 | | |
 |---|---|
-| Address | `https://snake.online-tichu.com` |
+| Address | `https://snake.online-tichu.com` (`www.snake.online-tichu.com` redirects to it) |
 | Repository | `github.com/Grillmeister5415/snake` (private), branch `main` |
 | Server | DigitalOcean droplet, `deploy@online-tichu.com` (188.166.103.103), Ubuntu 24.04 |
 | Folder on the server | `~/snake` |
 | Container | `snake` |
-| DNS | `snake.online-tichu.com` points to the droplet (checked 17 November 2026) |
+| DNS | `snake.online-tichu.com` points to the droplet; `www.snake` is an alias of it (both checked 17 November 2026) |
 
 ## Three projects share the droplet
 
@@ -40,6 +40,10 @@ The Snake container serves files and nothing else: no database, no accounts, no 
 - `Cache-Control: no-cache`: the browser asks each time whether a file changed, so players never run old code after a deploy.
 - A content policy that allows only the game's own files.
 - `Strict-Transport-Security` for six months, for this host only.
+
+## The `www.` address
+
+`https://www.snake.online-tichu.com` answers with a permanent redirect to `https://snake.online-tichu.com`, path and query kept. Tichu's Caddy does this by itself (Tichu task T408, [pull request 162](https://github.com/Grillmeister5415/tichu/pull/162), Tichu's release 47 on 17 November 2026); Snake's container is not involved, and nothing in this repository changes for it. The same release gave Unser Jahr's address a `www.` form too. The DNS record for `www.snake` is the owner's, at the registrar.
 
 ## What is on the droplet
 
@@ -110,7 +114,7 @@ Both must still answer as before (Tichu `200`, Unser Jahr `200`).
 ## Taking it down
 
 - **Stop serving:** on the droplet, `cd ~/snake && docker compose down`. The address then answers `502`; Tichu and Unser Jahr are not affected.
-- **Remove the address:** delete the `snake.online-tichu.com` block from Tichu's Caddyfile, through Tichu's release process.
+- **Remove the address:** delete the `snake.online-tichu.com` and `www.snake.online-tichu.com` blocks from Tichu's Caddyfile, through Tichu's release process, and remove the DNS records.
 - **Remove everything:** after the two steps above, `rm -rf ~/snake`.
 
 ## Tested on 17 November 2026
