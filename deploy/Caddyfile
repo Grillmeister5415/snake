@@ -1,4 +1,5 @@
-# Snake's own web server, inside the container `snake`. It only hands out the game's files.
+# Snake's own web server, inside the container `snake`. It hands out the game's files and passes
+# the leaderboard API (/api/*) on to the container `snake-api`.
 #
 # This is NOT the Caddy that faces the internet. That one belongs to the Tichu project
 # (/opt/tichu/infra/Caddyfile on the droplet); it holds the certificates and passes requests for
@@ -7,17 +8,19 @@
 	admin off
 	auto_https off
 	persist_config off
+	servers {
+		# Requests arrive from Tichu's Caddy over the private network caddy-edge. Trusting private
+		# addresses keeps the visitor's address that Tichu's Caddy put in X-Forwarded-For, so the
+		# API's per-address limits see visitors, not one proxy. Nothing public is trusted.
+		trusted_proxies static private_ranges
+	}
 }
 
 :8080 {
-	# `current` is a link to the release in use (www/releases/<time>), switched by deploy.sh.
-	root * /srv/current
 	encode zstd gzip
 
+	# For every answer, files and API alike.
 	header {
-		# The game is plain files without version numbers in their names, so the browser must ask
-		# each time whether a file changed (a cheap "not modified" answer), or players keep old code.
-		Cache-Control "no-cache"
 		# The game loads only its own files: no outside scripts, fonts or requests. `data:` is the
 		# tab icon; inline styles are allowed because the page sets sizes from script.
 		Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; form-action 'none'"
@@ -28,9 +31,29 @@
 		-Server
 	}
 
-	# Nothing hidden is ever served, even if a dotfile lands in a release by mistake.
-	@hidden path */.*
-	respond @hidden 404
+	# The leaderboard API. Its answers carry their own Cache-Control (no-store, or private, no-store
+	# for the boards, which hold the visitor's own row); only a missing one is filled in.
+	handle /api/* {
+		# A replay is at most 512 KiB (src/replay.js REPLAY_LIMITS); the API checks the exact limit.
+		request_body {
+			max_size 600KB
+		}
+		header ?Cache-Control "no-store"
+		reverse_proxy snake-api:8090
+	}
 
-	file_server
+	# The game's files.
+	handle {
+		# `current` is a link to the release in use (www/releases/<time>), switched by deploy.sh.
+		root * /srv/current
+		# The game is plain files without version numbers in their names, so the browser must ask
+		# each time whether a file changed (a cheap "not modified" answer), or players keep old code.
+		header Cache-Control "no-cache"
+
+		# Nothing hidden is ever served, even if a dotfile lands in a release by mistake.
+		@hidden path */.*
+		respond @hidden 404
+
+		file_server
+	}
 }

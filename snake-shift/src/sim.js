@@ -25,7 +25,7 @@ const cell = (x, y) => Object.freeze({ x, y });
  * createSim({ universes, speed, seed, start })
  *   universes: [{ id, rules: 'box'|'lane'|'cube', mushrooms, rare, room, weight }] (default: the sixteen)
  *   start (tests and debug): { score, lives, universe, snake: [{x,y}...head first], dir, food } (board-local)
- * Events: reset, pause, resume, turn, step, ate { kind, score, cell, lifeGained, held },
+ * Events: reset, pause, resume, turn { dir, queued, tick }, step, ate { kind, score, cell, lifeGained, held },
  *   shift { from, to, index, reset }, lifeLost { lives, death }, died { death, score, tick }.
  * On a food tick: step, ate, then (unless held) the universe, space and dot change and shift fires.
  */
@@ -214,7 +214,8 @@ export function createSim({ universes = UNIVERSES, speed = SPEED, seed = 1, star
     if (d === last || d === OPPOSITE[last]) return false;
     queue.push(d);
     touch();
-    emit('turn', { dir: d, queued: queue.length });
+    // tick: steps taken so far, so a recorded turn replays before step tick + 1 (src/replay.js).
+    emit('turn', { dir: d, queued: queue.length, tick });
     return true;
   }
 

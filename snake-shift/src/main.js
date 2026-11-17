@@ -1,8 +1,11 @@
 // SNAKE//SHIFT entry: loop, wiring, debug switches.
 // One-way flow: input -> sim -> events -> director -> renderers/audio/UI.
 // The simulation picks the universe (and its rules); the director picks only the look.
+// HALL OF SHIFTERS (LEADERBOARD_PLAN): identity, tickets, outbox, run status and the two menu
+// overlays live in their own modules; this file only wires them to the game flow. Nothing in
+// play(), startRun() or again() waits for the network.
 
-import { GRID, parseOptions } from './config.js';
+import { GRID, parseOptions, practiceParams } from './config.js';
 import { createSim } from './sim.js';
 import { createDirector, buildUniverses, simUniverses } from './director.js';
 import { createFx, createQuality } from './fx.js';
@@ -14,8 +17,19 @@ import { createPressure } from './pressure.js';
 import { randomSeed, hashSeed } from './rng.js';
 import { createFlatRenderer } from './render/flat.js';
 import { loadTimelines, loadRoomModules, loadEngine, loadSound, loadPersp } from './render/registry.js';
+import { RULESET, sameRules } from './ruleset.js';
+import { createApi } from './api.js';
+import { createIdentity } from './identity.js';
+import { createTickets } from './tickets.js';
+import { createOutbox } from './outbox.js';
+import { createRanked, statusText, canUpgrade } from './ranked.js';
+import { createNav } from './nav.js';
+import { createBoard } from './board.js';
+import { createUsername } from './username.js';
 
 const opts = parseOptions(location.search);
+// Practice runs (A9): any practice parameter in the address, by raw presence. Never ranked.
+const practice = practiceParams(location.search).length > 0;
 const $ = (id) => document.getElementById(id);
 const stage = $('stage');
 const glCanvas = $('gl');
@@ -41,7 +55,77 @@ const ui = createUI({
     else if (mode === 'paused') ui.showPaused(true);
     else if (mode === 'ready' || mode === 'respawn') { pausedFrom = mode; mode = 'paused'; ui.showPaused(true); }
   },
+  onBoard: (origin, opener) => openBoard(origin, opener),
+  onMenu: () => toTitle(),
+  onIdentity: (origin, opener) => openUsername(origin, opener, 'change'),
 });
+
+// ---------- leaderboard: identity, tickets, outbox (LEADERBOARD_PLAN C4) ----------
+// ?auto never touches the network (Part B 4): every call fails at once as offline.
+const api = createApi({ enabled: !opts.auto });
+const identity = createIdentity({ api });
+const outbox = createOutbox({ api, onAuthLost: (id) => identity.sessionLost(id) });
+const tickets = createTickets({
+  api, ruleset: RULESET, playerId: () => identity.activePlayerId(),
+  // Never hoard (the server retires the oldest beyond 30): none for practice, none while runs wait.
+  mayRefill: () => !practice && outbox.pending(identity.activePlayerId()) === 0,
+  onAuthLost: (id) => identity.sessionLost(id),
+});
+const nav = createNav();
+const board = createBoard({
+  api,
+  who: () => { const id = identity.get(); return { playerId: identity.activePlayerId(), hasUsername: !!id.handle }; },
+  onBack: () => closeOverlay(),
+  onMain: (origin) => {
+    closeOverlay({ focus: origin === 'pause' });
+    if (origin === 'title') play();
+    else if (origin === 'over') again();
+  },
+  onSetUsername: (opener) => openUsername('board', opener, 'change'),
+  announce: (t) => ui.announce(t),
+});
+const username = createUsername({
+  onSubmit: (handle, formMode) => {
+    identity.setHandle(handle);
+    const from = closeOverlay({ focus: formMode !== 'first' });
+    if (formMode === 'first' && from && from.origin === 'title') startFirstRun();
+    sync();
+  },
+  onSkip: () => {
+    identity.skip();
+    closeOverlay({ focus: false });
+    startFirstRun();
+  },
+  onBack: () => closeOverlay(),
+});
+identity.on(({ previous, playerId }) => {
+  // A new player (the old session was gone): the old player's waiting runs stay local for good.
+  if (previous && previous !== playerId) { outbox.dropPlayer(previous, 'session'); tickets.clear(); board.forget(); }
+  ui.setIdentity(identity.get());
+});
+ui.setIdentity(identity.get());
+
+/** Background upkeep while a menu is open: session, waiting runs, then a few tickets. */
+function sync() {
+  if (opts.auto) return;
+  identity.ensure().then(() => outbox.flush()).then(() => tickets.refill()).then(upgradeWaitingRun);
+}
+
+/**
+ * A ticket arrived while a local run still waits for its first direction: start that run again
+ * on the ticket, so it counts (the first run after choosing a username). Nothing has moved yet.
+ */
+function upgradeWaitingRun() {
+  const waitingMode = mode === 'paused' && pausedFrom === 'ready' ? 'ready' : mode;
+  if (!canUpgrade(run, sim.snapshot(), waitingMode) || tickets.count() === 0) return;
+  const next = ranked.begin(nextSeed);
+  if (!next.ranked) return; // the ticket went elsewhere (another tab): the waiting run stays as it is
+  run = next;
+  sim.reset(run.seed);
+  ranked.attach(run, sim);
+}
+window.addEventListener('online', () => { if (!opts.auto) { outbox.kick(); sync(); } });
+sync(); // tickets arrive while the timelines load
 
 const [timelines, roomMods, engine, sound] = await Promise.all([
   loadTimelines(),
@@ -231,18 +315,62 @@ sim.on('died', (e) => {
   audio.die();
   if (beat.running) { try { beat.stop(); } catch (err) { console.warn(err); } }
   ui.setLives(0, snap.maxLives, 'loss');
-  const isNew = prefs.record(snap.score);
+  // The run's result goes to the outbox in a task of its own; the local best is updated at once.
+  const ended = run;
+  ranked.finish(ended, { score: snap.score });
+  const isNew = prefs.record(snap.score, { practice });
   mode = 'over';
   clearTimeout(overTimer);
   overTimer = setTimeout(() => {
     if (mode !== 'over') return;
-    ui.showOver({ score: snap.score, best: prefs.get().best, isNew });
+    shownRun = ended;
+    const st = ranked.status(ended);
+    ui.showOver({ score: snap.score, best: prefs.bestFor({ practice }), isNew, status: statusView(st) });
+    if (st.state === 'saved' || st.state === 'waiting') announceStatus(st); // answered before the panel came
     if (opts.auto) overTimer = setTimeout(() => { if (mode === 'over') again(); }, 1400);
+    else sync();
   }, 650);
+});
+
+// ---------- run status on game over (A4) ----------
+let run = null;      // the run being played (ranked.begin)
+let shownRun = null; // the run the game-over panel shows; answers for any other run never touch it
+const ranked = createRanked({
+  identity, tickets, outbox, practice,
+  rulesOk: () => sameRules(simUniverses(universes), sim.speed),
+});
+const statusView = (st) => {
+  const t = statusText(st);
+  return { state: st.state, text: t.detail ? `${t.text} \u00b7 ${t.detail}` : t.text, detail: t.detail, wall: t.wall };
+};
+/** The one polite announcement for a finished save or a failure (A8). */
+function announceStatus(st) {
+  const v = statusView(st);
+  if (st.state === 'saved') ui.announce(v.wall ? `Saved. ${v.detail.toLowerCase()}. You made the wall.` : v.detail ? `Saved. ${v.detail.toLowerCase()}.` : 'Saved.');
+  else if (st.state === 'waiting') ui.announce('Waiting to sync.');
+  else if (st.state === 'local') ui.announce(`Not saved: ${v.detail.toLowerCase() || 'local run'}.`);
+}
+ranked.on((r, st) => {
+  if (r !== shownRun || mode !== 'over') return;
+  ui.setRunStatus(statusView(st));
+  announceStatus(st);
+});
+outbox.on((ev) => {
+  if (ev.state !== 'saved') return;
+  if (board.isOpen) board.refresh();
+  tickets.refill().then(upgradeWaitingRun);
 });
 
 // ---------- flow ----------
 function play() {
+  if (mode !== 'title' || nav.overlay !== 'none') return;
+  // The first PLAY asks for a username once (A0, C6); ?auto never does.
+  if (!opts.auto && identity.needsUsername()) { openUsername('title', $('btn-play'), 'first'); return; }
+  startFirstRun();
+}
+
+/** Leaves the title for a run, inside the user gesture that asked for it (audio unlock). */
+function startFirstRun() {
   if (mode !== 'title') return;
   audio.unlock();
   audio.setMuted(prefs.get().muted);
@@ -252,7 +380,11 @@ function play() {
 function startRun() {
   clearTimeout(overTimer);
   pausedFrom = null;
-  sim.reset(nextSeed()); // waiting 'start'
+  shownRun = null;
+  // Ranked or local is decided here, once (A9): a ticket's seed, or a random one.
+  run = ranked.begin(nextSeed);
+  sim.reset(run.seed); // waiting 'start'
+  ranked.attach(run, sim);
   if (autopilot) autopilot.reset();
   mode = 'ready';
   ui.showReady(touchSeen);
@@ -263,6 +395,68 @@ function again() {
   if (mode !== 'over') return;
   ui.hideOver();
   startRun();
+}
+
+/** [ MENU ] on game over: back to the title. Audio stays stopped; the next PLAY starts afresh. */
+function toTitle() {
+  if (mode !== 'over' || nav.overlay !== 'none') return;
+  clearTimeout(overTimer);
+  shownRun = null;
+  ui.hideOver();
+  mode = 'title';
+  ui.showTitle();
+  sync();
+}
+
+// ---------- menu overlays (A5): the leaderboard and the USERNAME form ----------
+const PRIMARY = { title: 'btn-play', pause: 'btn-resume', over: 'btn-again' };
+
+function openBoard(origin, opener) {
+  if (nav.overlay !== 'none') return;
+  nav.open('board', { origin, opener });
+  ui.setCovered(true);
+  board.open({ origin });
+  sync(); // a menu is open: a good moment for tickets
+}
+
+function openUsername(origin, opener, formMode) {
+  if (nav.has('username')) return;
+  if (nav.overlay === 'board') { board.el.panel.setAttribute('inert', ''); board.el.panel.classList.add('is-covered'); }
+  nav.open('username', { origin, opener });
+  ui.setCovered(true);
+  const id = identity.get();
+  $('username-note').textContent = id.persistent ? 'Saved on this browser.' : 'This browser is not keeping data: the name lasts until you leave.';
+  username.open({
+    mode: formMode,
+    current: formMode === 'change' ? id.handle : null,
+    problem: id.problem ? id.problem.reason : null,
+    focusField: !touchSeen,
+  });
+}
+
+/**
+ * Closes the top overlay and goes back where it was opened from. The game mode and pausedFrom
+ * are never touched here, so a paused run stays paused. Returns the closed entry.
+ */
+function closeOverlay({ focus = true } = {}) {
+  const entry = nav.close();
+  if (!entry) return null;
+  if (entry.kind === 'board') board.close(); else username.close();
+  if (nav.overlay === 'board') {
+    board.el.panel.removeAttribute('inert');
+    board.el.panel.classList.remove('is-covered');
+    board.rerender();
+    if (focus) (entry.opener && entry.opener.isConnected ? entry.opener : board.el.heading).focus({ preventScroll: true });
+    return entry;
+  }
+  ui.setCovered(false);
+  if (focus) {
+    const o = entry.opener;
+    const visible = o && o.isConnected && !o.closest('[hidden]') && o.getClientRects().length;
+    const target = visible ? o : $(PRIMARY[entry.origin]);
+    if (target) target.focus({ preventScroll: true });
+  }
+  return entry;
 }
 
 /** First direction key of a run (waiting 'start'). */
@@ -319,6 +513,9 @@ let usedGesture; // the swipe gesture that already turned the snake in first per
 createInput({
   stage,
   pad: $('dpad'),
+  // Every global key asks the mode and the open overlay first (nav.routeKey).
+  state: () => ({ mode, overlay: nav.overlay }),
+  onBack: () => closeOverlay(),
   onDir: (dir, source, gesture) => {
     if (source === 'swipe' || source === 'button') touchSeen = true;
     if (opts.auto) return;
@@ -568,5 +765,5 @@ if (opts.look) director.setLook(opts.look, frameNow);
 mode = 'title';
 ui.ready();
 ui.showTitle();
-if (opts.auto) play();
+if (opts.auto) play(); // straight in: no username step, no network (Part B 4)
 requestAnimationFrame(rafFrame);

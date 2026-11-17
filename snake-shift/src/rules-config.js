@@ -60,9 +60,12 @@ const u = (id, more = {}) => Object.freeze({
   id, rules: 'box', mushrooms: false, rare: false, room: false, weight: 1, ...more,
 });
 
-// The sixteen universes of LEVELS_PLAN 2.1. Used when createSim gets no table.
+// The sixteen universes of LEVELS_PLAN 2.1. Used when createSim gets no table, and as the base
+// director.buildUniverses fills from the module metas.
 export const UNIVERSES = Object.freeze([
-  // Weights match the game's module metas (director.buildUniverses), so tests measure the real mix.
+  // Not the ranked table: the game plays the weights of the loaded module metas, and two of them
+  // differ from these (lane 3 and mushroom 0.9; both play SPECIAL.weight, so the mix is the same).
+  // The canonical table a ranked run must match is RANKED_UNIVERSES in src/ruleset.js.
   u('lcd'), u('arcade', { weight: 3 }), u('acid', { weight: 2 }), u('kombat', { weight: 3 }), u('desktop', { weight: 2 }),
   u('timewarp', { rare: true }), u('wrong', { rare: true }),
   u('court', { room: true, weight: 3 }), u('bunker', { room: true, weight: 3 }),

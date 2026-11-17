@@ -1,14 +1,19 @@
 # SNAKE//SHIFT on the droplet. Lives in its own folder (~/snake) as its own compose project, apart
 # from every other project on the server. Copied there by deploy.sh; never edited on the server.
 #
-# One small container that hands out the game's files from ./www (read-only). Caddy, which belongs
-# to the Tichu project, reaches it as snake:8080 through the small network caddy-edge. Port 8791
-# answers on the droplet itself, for checks. See DEPLOY.md.
+# Two containers:
+# - `snake` hands out the game's files from ./www (read-only) and passes /api/* on to `snake-api`.
+#   Caddy, which belongs to the Tichu project, reaches it as snake:8080 through the small network
+#   caddy-edge. Port 8791 answers on the droplet itself, for checks.
+# - `snake-api` is the leaderboard (HALL OF SHIFTERS): Node with SQLite, code from ./api (read-only),
+#   data in the volume snake-api-data. It is only on the private network snake-internal, which has
+#   no way out, publishes no port and is never on caddy-edge.
+# See DEPLOY.md.
 name: snake
 
 services:
   snake:
-    # The same image the droplet already runs for Tichu's Caddy, so nothing new is downloaded.
+    # The same image the droplet already runs for Tichu's Caddy.
     image: caddy:2.11.7-alpine
     container_name: snake
     restart: unless-stopped
@@ -36,6 +41,7 @@ services:
       - '127.0.0.1:8791:8080'
     networks:
       - caddy-edge
+      - snake-internal
     healthcheck:
       test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:8080/']
       interval: 30s
@@ -47,7 +53,60 @@ services:
         max-size: '5m'
         max-file: '3'
 
+  snake-api:
+    # Node's long-term support line (26, "Lithium"; checked on nodejs.org 17 November 2026), where
+    # node:sqlite is a release candidate. No npm packages: node:http and node:sqlite only.
+    image: node:26.13.1-alpine
+    container_name: snake-api
+    restart: unless-stopped
+    # `current` is a link to the release in use (api/releases/<time>), switched by deploy.sh; the
+    # link is resolved when the process starts, so a restart picks up a new release.
+    command: ['node', '/srv/api/current/server/server.mjs']
+    user: '1000:1000'
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ['no-new-privileges:true']
+    mem_limit: 160m
+    pids_limit: 64
+    cpus: 0.5
+    environment:
+      NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=96
+      HOME: /tmp
+      SNAKE_DB: /data/snake.sqlite
+      SNAKE_PORT: '8090'
+      SNAKE_ORIGIN: https://snake.online-tichu.com
+    tmpfs:
+      - /tmp:size=16m,uid=1000,gid=1000
+    volumes:
+      - ./api:/srv/api:ro
+      - snake-api-data:/data
+    networks:
+      - snake-internal
+    # No `ports:` on purpose: only `snake` reaches it, as snake-api:8090.
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '-O', '/dev/null', 'http://127.0.0.1:8090/api/health']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    stop_grace_period: 15s
+    logging:
+      driver: json-file
+      options:
+        max-size: '5m'
+        max-file: '3'
+
 networks:
   # Shared with Tichu's Caddy (and the Unser Jahr container). Snake never creates or removes it.
   caddy-edge:
+    external: true
+  # Snake's own: `snake` and `snake-api` only. `internal` means no route out of it.
+  snake-internal:
+    internal: true
+
+volumes:
+  # The leaderboard's database, outside every release and the web root. Created once by deploy.sh
+  # (which also hands it to user 1000); external, so not even `docker compose down -v` removes it.
+  snake-api-data:
     external: true
