@@ -4,6 +4,10 @@ A browser Snake game with changing worlds, retro visuals and electronic music. E
 
 **[Play the game](https://snake.online-tichu.com)**
 
+## Why it is lightweight
+
+The game uses plain JavaScript with no frontend framework or external runtime dependencies. Canvas and WebGL draw the worlds from code, while Web Audio generates the music and sound effects. That keeps downloads small: there are no large graphics or audio packs to load. It also lowers rendering resolution when frames slow down, reducing the graphics workload.
+
 ## Contribute
 
 New levels, game mechanics, visual styles, sounds and bug fixes are welcome.
@@ -27,7 +31,7 @@ npm start
 
 Open http://localhost:4321. Run tests with `npm test` from the same folder.
 
-The game uses plain JavaScript, Canvas, WebGL and Web Audio, with no frontend dependencies or build step. Reduced flash, reduced motion and calmer sound options are available.
+No build step is needed. Reduced flash, reduced motion and calmer sound options are available.
 
 [Game controls and technical details](snake-shift/README.md)
 
