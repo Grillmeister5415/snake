@@ -365,6 +365,19 @@ h2 {
 .new { margin: 0 0 14px; font: 900 14px/1 var(--mono); letter-spacing: 0.3em; color: var(--cold); }
 #over .big { margin-top: 10px; }
 
+/* Crash screen (a scene that paints one: Desktop Error after a wall or self crash). The canvas is
+   a blue stop screen; the reboot line is plain white monospace on it. The game-over panel keeps
+   its normal solid look. */
+:root.crash-screen #hint.respawn {
+  background: transparent;
+  border: 0;
+  border-radius: 0;
+  padding: 4px 0;
+  color: #fff;
+  font: 700 15px/1.2 "Courier New", Courier, var(--mono);
+  letter-spacing: 0.08em;
+}
+
 @media (max-width: 520px) {
   .panel { padding: 20px 16px 16px; box-shadow: 5px 5px 0 var(--hot), -5px -5px 0 var(--cold); }
   .logo { text-shadow: 2px 0 0 var(--hot), -2px 0 0 var(--cold); }

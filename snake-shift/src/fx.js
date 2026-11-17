@@ -30,14 +30,14 @@ export function createFallbackBeat({ bpm = 132 } = {}) {
  *   director: director.get() result; beat: createBeat()-like object; prefs: { reducedFlash, reducedMotion }
  *   snap: the simulation snapshot (lives, universe, rules)
  * Extra fields beyond 15.3 (additive): strobe, invert, glitch, split, scene, prev, view, timeline, kind.
- * LEVELS_PLAN 4.2: lives, maxLives, universe, look, calm, rules, waiting.
+ * LEVELS_PLAN 4.2: lives, maxLives, universe, look, calm, rules, waiting. Crash screen: crashAge, panel.
  * Calm universes (lcd, abyss): no strobe, inversion, glitch or colour split; beat pulse capped at 15%.
  */
 export function createFx() {
   let lastNow = null;
   let time = 0;
 
-  function frame({ now, director: d, beat, prefs, snap = null }) {
+  function frame({ now, director: d, beat, prefs, snap = null, panel = null }) {
     const rf = !!prefs.reducedFlash;
     const calm = !!(d && d.calm);
     const rm = !!prefs.reducedMotion;
@@ -109,6 +109,10 @@ export function createFx() {
       calm,
       rules: snap && snap.universe ? snap.universe.rules : 'box',
       waiting: snap ? snap.waiting || null : null,
+      // ms since the director recorded a crash-screen crash (Infinity when none since the reset)
+      crashAge: d && Number.isFinite(d.crashAt) ? Math.max(0, now - d.crashAt) : Infinity,
+      // the game-over panel's rectangle { x, y, w, h } in stage px while a crash screen awaits it
+      panel: panel || null,
     };
   }
 

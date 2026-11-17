@@ -37,6 +37,9 @@ const flatCanvas = $('flat');
 const invertEl = $('invert');
 
 const prefs = createPrefs();
+let overRect = null; // game-over panel rectangle in stage px, for a scene's crash screen
+let run = null;      // the run being played (ranked.begin)
+let shownRun = null; // the run the game-over panel shows; answers for any other run never touch it
 let mode = 'loading'; // loading | title | ready | playing | paused | respawn | over
 let pausedFrom = null; // settings opened while waiting ('ready' or 'respawn'): resume returns there
 // Touch devices get swipe hints from the start; any touch anywhere (PLAY included) confirms it.
@@ -116,6 +119,7 @@ function sync() {
  * on the ticket, so it counts (the first run after choosing a username). Nothing has moved yet.
  */
 function upgradeWaitingRun() {
+  if (!run) return; // also while the game is still loading: there is no simulation yet
   const waitingMode = mode === 'paused' && pausedFrom === 'ready' ? 'ready' : mode;
   if (!canUpgrade(run, sim.snapshot(), waitingMode) || tickets.count() === 0) return;
   const next = ranked.begin(nextSeed);
@@ -296,6 +300,7 @@ sim.on('lifeLost', (e) => {
   const snap = sim.snapshot();
   logEvent('lifeLost', { lives: e.lives, reason: e.death && e.death.reason });
   director.onLifeLost(e, snap, frameNow);
+  ui.setCrash(director.get().crash);
   audio.setGameplay({ clear: true });
   audio.setLives(e.lives);
   audio.lifeLost();
@@ -310,6 +315,7 @@ sim.on('died', (e) => {
   const snap = sim.snapshot();
   logEvent('died', { score: e.score, reason: e.death && e.death.reason });
   director.onDeath(snap, frameNow);
+  ui.setCrash(director.get().crash);
   audio.setGameplay({ clear: true });
   audio.setLives(0);
   audio.die();
@@ -319,6 +325,10 @@ sim.on('died', (e) => {
   const ended = run;
   ranked.finish(ended, { score: snap.score });
   const isNew = prefs.record(snap.score, { practice });
+  // A crash screen keeps its text clear of the panel that arrives in 650 ms: measure it now.
+  overRect = director.get().crash
+    ? measureOver({ score: snap.score, best: prefs.bestFor({ practice }), isNew, status: statusView(ranked.status(ended)) })
+    : null;
   mode = 'over';
   clearTimeout(overTimer);
   overTimer = setTimeout(() => {
@@ -333,8 +343,6 @@ sim.on('died', (e) => {
 });
 
 // ---------- run status on game over (A4) ----------
-let run = null;      // the run being played (ranked.begin)
-let shownRun = null; // the run the game-over panel shows; answers for any other run never touch it
 const ranked = createRanked({
   identity, tickets, outbox, practice,
   rulesOk: () => sameRules(simUniverses(universes), sim.speed),
@@ -353,6 +361,7 @@ function announceStatus(st) {
 ranked.on((r, st) => {
   if (r !== shownRun || mode !== 'over') return;
   ui.setRunStatus(statusView(st));
+  if (overRect) overRect = measureOver(); // the status line may have changed the panel's height
   announceStatus(st);
 });
 outbox.on((ev) => {
@@ -377,8 +386,16 @@ function startFirstRun() {
   startRun();
 }
 
+/** The game-over panel's rectangle relative to the stage (the canvas). */
+function measureOver(data = null) {
+  const r = ui.measureOver(data), s = stage.getBoundingClientRect();
+  return { x: r.x - s.left, y: r.y - s.top, w: r.w, h: r.h };
+}
+
 function startRun() {
   clearTimeout(overTimer);
+  ui.setCrash(false);
+  overRect = null;
   pausedFrom = null;
   shownRun = null;
   // Ranked or local is decided here, once (A9): a ticket's seed, or a random one.
@@ -402,6 +419,8 @@ function toTitle() {
   if (mode !== 'over' || nav.overlay !== 'none') return;
   clearTimeout(overTimer);
   shownRun = null;
+  ui.setCrash(false);
+  overRect = null;
   ui.hideOver();
   mode = 'title';
   ui.showTitle();
@@ -477,6 +496,7 @@ function respawn(dir) {
     if (turn) sim.queueTurn(turn);
   }
   sim.setPaused(false);
+  ui.setCrash(false);
   audio.respawned();
   mode = 'playing';
   ui.showPlaying();
@@ -573,6 +593,7 @@ function resize() {
   const room = Math.max(below, side);
   document.documentElement.dataset.dpad = below >= side ? 'bottom' : 'side';
   document.documentElement.style.setProperty('--dpad-k', `${Math.max(44, Math.min(78, Math.floor((room - 8) / 3)))}px`);
+  if (overRect) overRect = measureOver();
   if (engine && typeof engine.resize === 'function') {
     try { engine.resize(w, h, dpr); } catch (e) { console.warn('[main] engine.resize failed', e); }
   }
@@ -635,7 +656,7 @@ function frame(t) {
     ui.setLifeIcon(lifeIconFor(d));
   }
   const p = prefs.get();
-  const fx = fxer.frame({ now: t, director: d, beat, prefs: p, snap });
+  const fx = fxer.frame({ now: t, director: d, beat, prefs: p, snap, panel: overRect });
   lastFx = fx;
 
   let glActive = false;

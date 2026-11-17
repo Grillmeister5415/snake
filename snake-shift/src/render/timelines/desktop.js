@@ -39,6 +39,9 @@ const blit = (ctx, c, x, y, dpr) => ctx.drawImage(c, x, y, c.width / dpr, c.heig
 export const meta = {
   id: 'desktop', name: 'DESKTOP ERROR', year: '1995', kind: '2d',
   luma: 0.45, veil: '#3f8a88', weight: 2,
+  // A wall or self crash here shows the blue crash screen below instead of the director's
+  // inversion, strobe, veil and LIFE LOST card (director.js reads this flag).
+  crashScreen: true,
   hud: { fg: '#000000', bg: '#c0c0c0', accent: '#000080', panelFg: '#000000', panelBg: 'rgba(192,192,192,0.97)' },
 };
 
@@ -117,6 +120,154 @@ export function board(ctx, L, snap, fxIn) {
   zoomRects(ctx, L, fx);
   drawDot(ctx, L, snap, fx);
   drawSnake(ctx, L, snap, fx, a);
+  ctx.restore();
+  crashScreen(ctx, L, snap, fxIn, a);
+}
+
+// ───────────────────────────── crash screen ─────────────────────────────
+// A wall or self crash in this universe (not inside Reality.exe, which borrows this board): a
+// steady blue full-stage stop screen for the whole respawn wait, and on the final crash until the
+// next run. Shows the board edge, the dot and the snake where they are; the text never covers the
+// snake, the cells ahead of it or the dot. Hard cut in; under Reduced flash it fades in over 200 ms.
+
+const CRASH_BLUE = '#0000aa';
+const CRASH_HUD = 104;          // DOM HUD band plus room for the hint when it sits at the top (d-pad)
+const CRASH_FOOT = 56;          // the hint pill at the bottom
+const CRASH_FADE_MS = 200;
+const CRASH_CAUSE = {
+  wall: ['STOP 0437:WALL', 'The edge of the decade was reached.'],
+  self: ['STOP 0437:TAIL', 'Tail is not a valid direction.'],
+};
+const MONO = (px) => `bold ${px}px "Courier New", Courier, monospace`;
+
+/** Is this snapshot on the crash screen? Pure: only `snap` and the raw `fx`. */
+export function crashShowing(snap, fx) {
+  if (!snap || !fx || fx.universe !== 'desktop') return false;
+  const d = snap.death;
+  if (!d || !CRASH_CAUSE[d.reason]) return false;
+  return snap.waiting === 'respawn' || snap.alive === false;
+}
+
+/** The crash text, paragraph by paragraph ('' = blank line). */
+export function crashLines(snap) {
+  const [code, cause] = CRASH_CAUSE[snap.death.reason];
+  const n = Math.max(0, num(snap.lives) | 0);
+  const last = snap.alive === false
+    ? 'NO LIVES REMAINING \u2014 THE TIMELINE HAS BEEN CLOSED'
+    : n === 1 ? '1 REMAINING \u2014 LAST LIFE' : `LIFE LOST \u2014 ${n} REMAINING`;
+  return ['SNAKE.EXE \u2014 SYSTEM TIME FAULT', '', code, cause, '', last];
+}
+
+// Board cells the text must leave clear: the snake, up to four cells ahead of the head, the dot.
+function keepClear(L, snap) {
+  const c = L.cell, m = Math.max(4, Math.round(c * 0.25)), out = [];
+  const add = (x, y) => {
+    if (x < 0 || y < 0 || x >= L.cols || y >= L.rows) return;
+    out.push({ x: L.bx + x * c - m, y: L.by + y * c - m, w: c + 2 * m, h: c + 2 * m });
+  };
+  const s = snap.snake || [];
+  for (const p of s) add(X(p), Y(p));
+  if (s.length) {
+    const d = headDir(snap);
+    for (let k = 1; k <= 4; k++) add(X(s[0]) + d[0] * k, Y(s[0]) + d[1] * k);
+  }
+  if (snap.food) add(X(snap.food), Y(snap.food));
+  return out;
+}
+
+const hits = (r, list) => list.some((o) => r.x < o.x + o.w && r.x + r.w > o.x && r.y < o.y + o.h && r.y + r.h > o.y);
+
+function wrapLines(ctx, paras, maxW) {
+  const out = [];
+  for (const p of paras) {
+    if (!p) { out.push(''); continue; }
+    let line = '';
+    for (const wd of p.split(' ')) {
+      const t = line ? `${line} ${wd}` : wd;
+      if (line && ctx.measureText(t).width > maxW) { out.push(line); line = wd; } else line = t;
+    }
+    out.push(line);
+  }
+  return out;
+}
+
+/**
+ * Where the text goes: the largest font (shrinking to 10 px) whose block fits between the HUD band
+ * and the hint without touching the kept-clear cells. Top-left first, then down the left side,
+ * then the right side. On the final crash it also stays off the game-over panel: `panel` is its
+ * measured rectangle (fx.panel), else an estimate of the centred panel. When the whole text does
+ * not fit anywhere it drops the blank lines, then keeps only the header and the stop code; on the
+ * final crash it draws nothing rather than go under the panel. Returns { fs, lh, lines, x, y } or null.
+ */
+export function crashLayout(ctx, L, snap, panel = null) {
+  const paras = crashLines(snap);
+  const final = snap.alive === false;
+  const clear = keepClear(L, snap);
+  const avoid = [...clear];
+  if (final) {
+    const ok = panel && [panel.x, panel.y, panel.w, panel.h].every(Number.isFinite) && panel.w > 0 && panel.h > 0;
+    const pw = Math.min(560, L.w - 32), ph = Math.min(320, L.h * 0.5);
+    const r = ok ? panel : { x: (L.w - pw) / 2, y: (L.h - ph) / 2, w: pw, h: ph };
+    const m = 10; // the panel's offset shadow
+    avoid.push({ x: r.x - m, y: r.y - m, w: r.w + 2 * m, h: r.h + 2 * m });
+  }
+  const pad = Math.max(16, Math.round(L.w * 0.03));
+  // The hint and d-pad are hidden on the final crash: its text may use the top and bottom strips.
+  const top = final ? 72 : CRASH_HUD, bottom = L.h - (final ? 12 : CRASH_FOOT);
+  const big = Math.max(12, Math.min(24, Math.round(Math.min(L.w, L.h) * 0.034)));
+  const tiers = [paras, paras.filter(Boolean), [paras[0], paras[2]]];
+  for (const tier of tiers) {
+    for (let fs = big; fs >= 10; fs--) {
+      ctx.font = MONO(fs);
+      const lines = wrapLines(ctx, tier, L.w - 2 * pad);
+      const lh = Math.round(fs * 1.35);
+      const bw = Math.ceil(Math.max(...lines.map((t) => ctx.measureText(t).width))), bh = lines.length * lh;
+      if (top + bh > bottom) continue;
+      const xs = [pad, Math.max(pad, L.w - pad - bw)];
+      for (const x of xs) {
+        for (let y = top; y + bh <= bottom; y += Math.max(2, Math.round(lh / 4))) {
+          if (!hits({ x, y, w: bw, h: bh }, avoid)) return { fs, lh, lines, x, y };
+        }
+      }
+    }
+  }
+  if (final) return null;
+  ctx.font = MONO(10);
+  return { fs: 10, lh: 14, lines: wrapLines(ctx, paras.filter(Boolean), L.w - 2 * pad), x: pad, y: top };
+}
+
+function crashScreen(ctx, L, snap, fxIn, a) {
+  if (!crashShowing(snap, fxIn)) return;
+  const fx = norm(fxIn);
+  const age = Number.isFinite(fxIn.crashAge) ? fxIn.crashAge : Infinity;
+  const alpha = fx.rf ? Math.max(0, Math.min(1, age / CRASH_FADE_MS)) : 1;
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.fillStyle = CRASH_BLUE;
+  ctx.fillRect(0, 0, L.w, L.h);
+  // board edge: a thin dashed white outline (steady)
+  ctx.globalAlpha = Math.max(alpha, 0.35);
+  ctx.setLineDash([6, 5]); ctx.lineWidth = 1; ctx.strokeStyle = '#ffffff';
+  ctx.strokeRect(L.bx + 0.5, L.by + 0.5, L.bw - 1, L.bh - 1);
+  ctx.setLineDash([]);
+  ctx.globalAlpha = 1;
+  // the dot and the snake where they are; steady (no beat lift or blink on this screen)
+  const calm = { ...fx, beat: 0, punch: 0, bite: null, biteAge: Infinity };
+  drawDot(ctx, L, snap, calm);
+  drawSnake(ctx, L, snap, calm, a);
+  // text
+  const lay = crashLayout(ctx, L, snap, fxIn.panel);
+  if (lay) {
+    ctx.globalAlpha = alpha;
+    ctx.font = MONO(lay.fs); ctx.textBaseline = 'top'; ctx.textAlign = 'left'; ctx.fillStyle = '#ffffff';
+    // the stop slips sideways for a moment on a few lines (never under Reduced motion or flash)
+    const k = !fx.rf && !fx.rm && age < CRASH_FADE_MS ? 1 - age / CRASH_FADE_MS : 0;
+    lay.lines.forEach((t, i) => {
+      if (!t) return;
+      const off = k && (i === 0 || i === 2) ? Math.round(k * lay.fs * 0.5 * (i === 0 ? 1 : -1)) : 0;
+      ctx.fillText(t, lay.x + off, lay.y + i * lay.lh);
+    });
+  }
   ctx.restore();
 }
 
