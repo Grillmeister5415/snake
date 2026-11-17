@@ -194,38 +194,46 @@ function wrapLines(ctx, paras, maxW) {
 /**
  * Where the text goes: the largest font (shrinking to 10 px) whose block fits between the HUD band
  * and the hint without touching the kept-clear cells. Top-left first, then down the left side,
- * then the right side. On the final crash the centred game-over panel is avoided too when it can be.
+ * then the right side. On the final crash it also stays off the game-over panel: `panel` is its
+ * measured rectangle (fx.panel), else an estimate of the centred panel. When the whole text does
+ * not fit anywhere it drops the blank lines, then keeps only the header and the stop code; on the
+ * final crash it draws nothing rather than go under the panel. Returns { fs, lh, lines, x, y } or null.
  */
-export function crashLayout(ctx, L, snap) {
+export function crashLayout(ctx, L, snap, panel = null) {
   const paras = crashLines(snap);
+  const final = snap.alive === false;
   const clear = keepClear(L, snap);
-  const panel = snap.alive === false ? (() => {
+  const avoid = [...clear];
+  if (final) {
+    const ok = panel && [panel.x, panel.y, panel.w, panel.h].every(Number.isFinite) && panel.w > 0 && panel.h > 0;
     const pw = Math.min(560, L.w - 32), ph = Math.min(320, L.h * 0.5);
-    return [{ x: (L.w - pw) / 2, y: (L.h - ph) / 2, w: pw, h: ph }];
-  })() : [];
+    const r = ok ? panel : { x: (L.w - pw) / 2, y: (L.h - ph) / 2, w: pw, h: ph };
+    const m = 10; // the panel's offset shadow
+    avoid.push({ x: r.x - m, y: r.y - m, w: r.w + 2 * m, h: r.h + 2 * m });
+  }
   const pad = Math.max(16, Math.round(L.w * 0.03));
-  // The hint and d-pad are hidden on the final crash, so its text may use the bottom strip.
-  const top = CRASH_HUD, bottom = L.h - (snap.alive === false ? 12 : CRASH_FOOT);
+  // The hint and d-pad are hidden on the final crash: its text may use the top and bottom strips.
+  const top = final ? 72 : CRASH_HUD, bottom = L.h - (final ? 12 : CRASH_FOOT);
   const big = Math.max(12, Math.min(24, Math.round(Math.min(L.w, L.h) * 0.034)));
-  let fallback = null;
-  for (const avoid of panel.length ? [[...clear, ...panel], clear] : [clear]) {
+  const tiers = [paras, paras.filter(Boolean), [paras[0], paras[2]]];
+  for (const tier of tiers) {
     for (let fs = big; fs >= 10; fs--) {
       ctx.font = MONO(fs);
-      const lines = wrapLines(ctx, paras, L.w - 2 * pad);
+      const lines = wrapLines(ctx, tier, L.w - 2 * pad);
       const lh = Math.round(fs * 1.35);
       const bw = Math.ceil(Math.max(...lines.map((t) => ctx.measureText(t).width))), bh = lines.length * lh;
       if (top + bh > bottom) continue;
       const xs = [pad, Math.max(pad, L.w - pad - bw)];
       for (const x of xs) {
-        for (let y = top; y + bh <= bottom; y += Math.max(4, Math.round(lh / 2))) {
-          const r = { x, y, w: bw, h: bh };
-          if (!hits(r, avoid)) return { fs, lh, lines, x, y };
+        for (let y = top; y + bh <= bottom; y += Math.max(2, Math.round(lh / 4))) {
+          if (!hits({ x, y, w: bw, h: bh }, avoid)) return { fs, lh, lines, x, y };
         }
       }
-      if (!fallback || fs < fallback.fs) fallback = { fs, lh, lines, x: pad, y: top };
     }
   }
-  return fallback;
+  if (final) return null;
+  ctx.font = MONO(10);
+  return { fs: 10, lh: 14, lines: wrapLines(ctx, paras.filter(Boolean), L.w - 2 * pad), x: pad, y: top };
 }
 
 function crashScreen(ctx, L, snap, fxIn, a) {
@@ -248,7 +256,7 @@ function crashScreen(ctx, L, snap, fxIn, a) {
   drawDot(ctx, L, snap, calm);
   drawSnake(ctx, L, snap, calm, a);
   // text
-  const lay = crashLayout(ctx, L, snap);
+  const lay = crashLayout(ctx, L, snap, fxIn.panel);
   if (lay) {
     ctx.globalAlpha = alpha;
     ctx.font = MONO(lay.fs); ctx.textBaseline = 'top'; ctx.textAlign = 'left'; ctx.fillStyle = '#ffffff';

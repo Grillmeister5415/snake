@@ -162,6 +162,12 @@ export function createUI({ prefs, onPlay, onAgain, onPauseToggle, onMuteToggle, 
 
   let lastScore = -1;
 
+  function fillOver({ score, best, isNew }) {
+    el.overScore.textContent = String(score);
+    el.overBest.textContent = String(best);
+    show(el.overNew, isNew);
+  }
+
   return {
     ready() { show(el.loading, false); el.play.disabled = false; el.play.focus({ preventScroll: true }); },
     showTitle() {
@@ -195,14 +201,24 @@ export function createUI({ prefs, onPlay, onAgain, onPauseToggle, onMuteToggle, 
       if (on) el.resume.focus({ preventScroll: true }); else blurAll();
     },
     showOver({ score, best, isNew }) {
-      el.overScore.textContent = String(score);
-      el.overBest.textContent = String(best);
-      show(el.overNew, isNew);
+      fillOver({ score, best, isNew });
       show(el.hint, false); show(el.paused, false); show(el.over, true);
       inPlay = false; syncSwitches();
       el.again.focus({ preventScroll: true });
     },
     hideOver() { show(el.over, false); },
+    /**
+     * Where the game-over panel is (or will be, once shown with this data): its border box in
+     * viewport CSS px, measured invisibly when it is still hidden. Pass no data to keep the text.
+     */
+    measureOver(data = null) {
+      if (data) fillOver(data);
+      const o = el.over, hidden = o.hidden;
+      if (hidden) { o.style.visibility = 'hidden'; o.hidden = false; }
+      const r = o.getBoundingClientRect();
+      if (hidden) { o.hidden = true; o.style.visibility = ''; }
+      return { x: r.left, y: r.top, w: r.width, h: r.height };
+    },
     /**
      * The scene paints a crash screen for this lost life or final crash: the respawn hint reads
      * "... TO REBOOT" as plain text and the game-over panel drops its chrome (style.css).

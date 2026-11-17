@@ -23,6 +23,7 @@ const flatCanvas = $('flat');
 const invertEl = $('invert');
 
 const prefs = createPrefs();
+let overRect = null; // game-over panel rectangle in stage px, for a scene's crash screen
 let mode = 'loading'; // loading | title | ready | playing | paused | respawn | over
 let pausedFrom = null; // settings opened while waiting ('ready' or 'respawn'): resume returns there
 // Touch devices get swipe hints from the start; any touch anywhere (PLAY included) confirms it.
@@ -234,6 +235,8 @@ sim.on('died', (e) => {
   if (beat.running) { try { beat.stop(); } catch (err) { console.warn(err); } }
   ui.setLives(0, snap.maxLives, 'loss');
   const isNew = prefs.record(snap.score);
+  // A crash screen keeps its text clear of the panel that arrives in 650 ms: measure it now.
+  overRect = director.get().crash ? measureOver({ score: snap.score, best: prefs.get().best, isNew }) : null;
   mode = 'over';
   clearTimeout(overTimer);
   overTimer = setTimeout(() => {
@@ -251,9 +254,16 @@ function play() {
   startRun();
 }
 
+/** The game-over panel's rectangle relative to the stage (the canvas). */
+function measureOver(data = null) {
+  const r = ui.measureOver(data), s = stage.getBoundingClientRect();
+  return { x: r.x - s.left, y: r.y - s.top, w: r.w, h: r.h };
+}
+
 function startRun() {
   clearTimeout(overTimer);
   ui.setCrash(false);
+  overRect = null;
   pausedFrom = null;
   sim.reset(nextSeed()); // waiting 'start'
   if (autopilot) autopilot.reset();
@@ -380,6 +390,7 @@ function resize() {
   const room = Math.max(below, side);
   document.documentElement.dataset.dpad = below >= side ? 'bottom' : 'side';
   document.documentElement.style.setProperty('--dpad-k', `${Math.max(44, Math.min(78, Math.floor((room - 8) / 3)))}px`);
+  if (overRect) overRect = measureOver();
   if (engine && typeof engine.resize === 'function') {
     try { engine.resize(w, h, dpr); } catch (e) { console.warn('[main] engine.resize failed', e); }
   }
@@ -442,7 +453,7 @@ function frame(t) {
     ui.setLifeIcon(lifeIconFor(d));
   }
   const p = prefs.get();
-  const fx = fxer.frame({ now: t, director: d, beat, prefs: p, snap });
+  const fx = fxer.frame({ now: t, director: d, beat, prefs: p, snap, panel: overRect });
   lastFx = fx;
 
   let glActive = false;
