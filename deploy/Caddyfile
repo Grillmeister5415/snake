@@ -1,0 +1,36 @@
+# Snake's own web server, inside the container `snake`. It only hands out the game's files.
+#
+# This is NOT the Caddy that faces the internet. That one belongs to the Tichu project
+# (/opt/tichu/infra/Caddyfile on the droplet); it holds the certificates and passes requests for
+# snake.online-tichu.com to this container as snake:8080. See DEPLOY.md.
+{
+	admin off
+	auto_https off
+	persist_config off
+}
+
+:8080 {
+	# `current` is a link to the release in use (www/releases/<time>), switched by deploy.sh.
+	root * /srv/current
+	encode zstd gzip
+
+	header {
+		# The game is plain files without version numbers in their names, so the browser must ask
+		# each time whether a file changed (a cheap "not modified" answer), or players keep old code.
+		Cache-Control "no-cache"
+		# The game loads only its own files: no outside scripts, fonts or requests. `data:` is the
+		# tab icon; inline styles are allowed because the page sets sizes from script.
+		Content-Security-Policy "default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; object-src 'none'; base-uri 'none'; form-action 'none'"
+		Strict-Transport-Security "max-age=15552000"
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "no-referrer"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+	}
+
+	# Nothing hidden is ever served, even if a dotfile lands in a release by mistake.
+	@hidden path */.*
+	respond @hidden 404
+
+	file_server
+}
