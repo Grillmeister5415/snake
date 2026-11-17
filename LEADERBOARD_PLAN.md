@@ -124,7 +124,8 @@ Semantic HTML and light CSS; scores are real text.
 Eligibility is latched when the run starts.
 
 - Practice (never on the public board): `?auto`, `?debug`, an explicit `?seed`, debug universe/look/score/lives locks, and speed overrides (`?start`, `?ramp`, `?cap`, which work today **without** `?debug`). Check the raw presence of these parameters, not only parsed values; any attempted override means practice.
-- Still eligible: reduced flash, reduced motion, mute, calmer sound, touch buttons, keyboard, WebGL fallback (`?nogl` changes rendering only).
+- Changed by the owner on 17 November 2026, after release: runs with Reduced flash or Reduced motion on (at the start or switched on during the run) are easier and are **not** ranked.
+- Still eligible: mute, calmer sound, touch buttons, keyboard, WebGL fallback (`?nogl` changes rendering only).
 - The simulation's real universe table must equal the canonical one, or the run is local. A renderer fallback with identical rules is fine.
 - Old local bests are not imported into the global board. The saved best stays local.
 

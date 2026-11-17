@@ -23,6 +23,7 @@ export const LOCAL_REASONS = Object.freeze({
   nouser: 'NO USERNAME',
   blocked: 'USERNAME NOT ACCEPTED',
   offline: 'NOT CONNECTED YET',
+  reduced: 'REDUCED FLASH OR MOTION ON',
   mismatch: 'RELOAD TO RANK',
   zero: 'NO POINTS',
   long: 'TOO LONG TO RANK',
@@ -35,13 +36,16 @@ export const LOCAL_REASONS = Object.freeze({
 /**
  * Why a run starting now cannot be ranked, before a ticket is taken; null when it can be.
  * @param {{ practice: boolean, rulesOk: boolean, identity: { handle: string|null, skipped: boolean,
- *   problem: object|null }, playerId: string|null, mismatch: boolean }} facts
+ *   problem: object|null }, playerId: string|null, mismatch: boolean, reduced?: boolean }} facts
+ *   reduced: Reduced flash or Reduced motion is on. Both make the game easier (no strobes, no
+ *   first-person view), so the owner keeps such runs off the board (17 November 2026).
  */
-export function localReason({ practice, rulesOk, identity, playerId, mismatch }) {
+export function localReason({ practice, rulesOk, identity, playerId, mismatch, reduced = false }) {
   if (practice) return 'practice';
   if (!rulesOk) return 'rules';
   if (!identity.handle) return identity.skipped ? 'skipped' : 'nouser';
   if (identity.problem && identity.problem.kind === 'create') return 'blocked';
+  if (reduced) return 'reduced';
   if (mismatch) return 'mismatch';
   if (!playerId) return 'offline';
   return null;
@@ -99,7 +103,7 @@ export function savedStatus(answer) {
  * Returns { begin(randomSeed), attach(run, sim), finish(run, { score }), status(run), on(fn) }.
  */
 export function createRanked({
-  identity, tickets, outbox, practice, rulesOk,
+  identity, tickets, outbox, practice, rulesOk, reduced = () => false,
   defer = (fn) => setTimeout(fn, 0), keep = 30,
 }) {
   let counter = 0;
@@ -135,7 +139,7 @@ export function createRanked({
   function begin(randomSeed) {
     const n = ++counter;
     const playerId = identity.activePlayerId();
-    let reason = localReason({ practice, rulesOk: rulesOk(), identity: identity.get(), playerId, mismatch: tickets.mismatch });
+    let reason = localReason({ practice, rulesOk: rulesOk(), identity: identity.get(), playerId, mismatch: tickets.mismatch, reduced: reduced() });
     let ticket = null;
     if (!reason) {
       ticket = tickets.take();
@@ -184,10 +188,21 @@ export function createRanked({
     return run.status;
   }
 
+  /**
+   * A ranked run that is still being played stops counting (a Reduced switch was turned on in the
+   * pause menu). It plays on as a local run; its ticket is not used again.
+   */
+  function demote(run, reason) {
+    if (!run || !run.ranked || run.status.state !== 'playing') return;
+    if (run.recorder) run.recorder.dispose();
+    setStatus(run, { state: 'local', reason });
+  }
+
   return {
     begin,
     attach,
     finish,
+    demote,
     status: (run) => (run ? run.status : null),
     on(fn) { listeners.add(fn); return () => listeners.delete(fn); },
   };

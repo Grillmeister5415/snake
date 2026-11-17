@@ -66,6 +66,7 @@ The title shows a photosensitivity warning on every load. Wild by default: strob
 
 - **Reduced flash**: no strobes or inversions; every shift still happens on time (it can change the rules) but as a 450 ms veiled fade, and when shifts come less than 3.5 s apart the veil stays partly up between them. Beat pulse capped at 15%.
 - **Reduced motion**: scenery at 15% speed, no camera glides, no first-person view. Defaults to the system setting.
+- Runs with **Reduced flash** or **Reduced motion** on (at the start, or switched on during the run) are easier and do not count for the leaderboard; game over says "Local run". They still count for the local best.
 - **Calmer sound**: no vacuum transitions, a third of the music's tension response, no anticipation noise or nerve voice on the last life. The music stays. Either switch above also gives the calmer sound.
 
 All three are on the title and in settings, and are saved locally.

@@ -295,3 +295,35 @@ test('canUpgrade: only a run that is local for want of a ticket and has not move
   const s = createSim({ universes: RANKED_UNIVERSES, speed: RANKED_SPEED, seed: 7 }).snapshot();
   assert.equal(canUpgrade(local, s, 'ready'), true);
 });
+
+// ---------------------------------------------------------------- Reduced switches are not ranked
+
+test('reduced: a run with Reduced flash or motion on is local, and switching one on mid-run demotes it', async () => {
+  const { LOCAL_REASONS } = await import('../src/ranked.js');
+  const base = { practice: false, rulesOk: true, identity: { handle: 'ABC', skipped: false, problem: null }, playerId: 'p1', mismatch: false };
+  assert.equal(localReason(base), null);
+  assert.equal(localReason({ ...base, reduced: true }), 'reduced');
+  assert.equal(localReason({ ...base, reduced: true, practice: true }), 'practice');
+  assert.ok(LOCAL_REASONS.reduced);
+
+  let on = false, taken = 0;
+  const sent = [];
+  const ranked = createRanked({
+    identity: { activePlayerId: () => 'p1', get: () => base.identity },
+    tickets: { mismatch: false, take: () => ({ runId: `r${++taken}`, seed: 5, playerId: 'p1', expiresAt: 0 }) },
+    outbox: { on() {}, enqueue: (x) => { sent.push(x); return { ok: true }; } },
+    practice: false, rulesOk: () => true, reduced: () => on, defer: (fn) => fn(),
+  });
+  // On at the start: local, and no ticket is used up.
+  on = true;
+  const a = ranked.begin(() => 1);
+  assert.deepEqual([a.ranked, a.reason, taken], [false, 'reduced', 0]);
+  // Off at the start, switched on while playing: the run stops counting and is never sent.
+  on = false;
+  const b = ranked.begin(() => 1);
+  assert.equal(b.ranked, true);
+  ranked.demote(b, 'reduced');
+  assert.deepEqual(ranked.status(b), { state: 'local', reason: 'reduced' });
+  assert.deepEqual(ranked.finish(b, { score: 9 }), { state: 'local', reason: 'reduced' });
+  assert.equal(sent.length, 0);
+});

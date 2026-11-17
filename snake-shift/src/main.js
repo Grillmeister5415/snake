@@ -343,10 +343,15 @@ sim.on('died', (e) => {
 });
 
 // ---------- run status on game over (A4) ----------
+/** Reduced flash or Reduced motion: easier play, so such runs are not ranked. */
+function reducedOn() { const p = prefs.get(); return p.reducedFlash || p.reducedMotion; }
 const ranked = createRanked({
   identity, tickets, outbox, practice,
   rulesOk: () => sameRules(simUniverses(universes), sim.speed),
+  reduced: reducedOn,
 });
+// Turning a Reduced switch on in the middle of a run takes that run off the board as well.
+prefs.on(() => { if (reducedOn()) ranked.demote(run, 'reduced'); });
 const statusView = (st) => {
   const t = statusText(st);
   return { state: st.state, text: t.detail ? `${t.text} \u00b7 ${t.detail}` : t.text, detail: t.detail, wall: t.wall };
