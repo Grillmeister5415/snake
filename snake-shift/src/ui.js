@@ -1,12 +1,18 @@
 // DOM interface: title with the photosensitivity warning and both switches,
 // HUD themed per timeline, pause/settings panel, game over with best score.
+// Menus (LEADERBOARD_PLAN A4, A5): [ LEADERBOARD ] on title, pause and game over, [ MENU ] on game
+// over, the "PLAYING AS" line, and the game-over status line, which has a fixed height so a status
+// that arrives later never moves [ AGAIN? ]. While a menu overlay is open, everything else is inert.
 // Lives (LEVELS_PLAN 4.3): five slots on a small canvas, drawn with the current universe's
 // life(ctx, x, y, size, filled, fx) export, falling back to a rounded block in the HUD accent.
 // The UI only reads state and calls back into main.js.
 
 const DEFAULT_HUD = { fg: '#f4f4f4', bg: 'rgba(0,0,0,0.72)', accent: '#ff2bd6', panelFg: '#f4f4f4', panelBg: 'rgba(8,6,16,0.94)' };
 
-export function createUI({ prefs, onPlay, onAgain, onPauseToggle, onMuteToggle, onSettings }) {
+export function createUI({
+  prefs, onPlay, onAgain, onPauseToggle, onMuteToggle, onSettings,
+  onBoard = () => {}, onMenu = () => {}, onIdentity = () => {},
+}) {
   const $ = (id) => document.getElementById(id);
   const root = document.documentElement;
   const el = {
@@ -16,6 +22,10 @@ export function createUI({ prefs, onPlay, onAgain, onPauseToggle, onMuteToggle, 
     play: $('btn-play'), resume: $('btn-resume'), again: $('btn-again'),
     overScore: $('over-score'), overBest: $('over-best'), overNew: $('over-new'),
     loading: $('loading'), dpad: $('dpad'), lives: $('lives'),
+    boardTitle: $('btn-board-title'), boardPause: $('btn-board-pause'), boardOver: $('btn-board-over'),
+    menu: $('btn-menu'), identity: $('identity'), identityText: $('identity-text'), identityBtn: $('btn-identity'),
+    identityPause: $('btn-identity-pause'), status: $('over-status'), statusText: $('over-status-text'),
+    wall: $('over-wall'), live: $('live'), stage: $('stage'),
   };
   let inPlay = false; // HUD showing (ready, playing, paused)
   let touchHint = false;
@@ -54,6 +64,15 @@ export function createUI({ prefs, onPlay, onAgain, onPauseToggle, onMuteToggle, 
   el.pause.addEventListener('click', (e) => { e.currentTarget.blur(); onPauseToggle(); });
   el.mute.addEventListener('click', (e) => { e.currentTarget.blur(); onMuteToggle(); });
   el.settings.addEventListener('click', (e) => { e.currentTarget.blur(); onSettings(); });
+  el.boardTitle.addEventListener('click', (e) => onBoard('title', e.currentTarget));
+  el.boardPause.addEventListener('click', (e) => onBoard('pause', e.currentTarget));
+  el.boardOver.addEventListener('click', (e) => onBoard('over', e.currentTarget));
+  el.menu.addEventListener('click', () => onMenu());
+  el.identityBtn.addEventListener('click', (e) => onIdentity('title', e.currentTarget));
+  el.identityPause.addEventListener('click', (e) => onIdentity('pause', e.currentTarget));
+
+  // Everything behind a modal overlay: no focus, no clicks, no screen reader.
+  const background = [el.stage, el.hud, el.dpad, el.hint, el.title, el.paused, el.over];
 
   function show(node, on) { node.hidden = !on; }
   function blurAll() { if (document.activeElement && document.activeElement !== document.body) document.activeElement.blur(); }
@@ -200,11 +219,47 @@ export function createUI({ prefs, onPlay, onAgain, onPauseToggle, onMuteToggle, 
       el.pause.setAttribute('aria-pressed', String(on));
       if (on) el.resume.focus({ preventScroll: true }); else blurAll();
     },
-    showOver({ score, best, isNew }) {
+    showOver({ score, best, isNew, status = null }) {
       fillOver({ score, best, isNew });
+      this.setRunStatus(status);
       show(el.hint, false); show(el.paused, false); show(el.over, true);
       inPlay = false; syncSwitches();
       el.again.focus({ preventScroll: true });
+    },
+    /** The run's save status on game over: { state, text, wall } or null. Never takes focus. */
+    setRunStatus(status) {
+      el.status.dataset.state = status ? status.state : '';
+      el.statusText.textContent = status ? status.text : '';
+      el.wall.textContent = status && status.wall ? 'YOU MADE THE WALL.' : '';
+    },
+    /** The "PLAYING AS" line on the title and the username button in the pause menu. */
+    setIdentity({ handle, skipped, problem }) {
+      const line = el.identityText;
+      line.replaceChildren();
+      const b = (t) => { const n = document.createElement('b'); n.textContent = t; return n; };
+      if (handle && problem && problem.kind === 'create') line.append(b(handle), ' WAS NOT ACCEPTED');
+      else if (handle && problem) line.append('PLAYING AS ', b(handle), ' \u00b7 NEW NAME NOT ACCEPTED');
+      else if (handle) line.append('PLAYING AS ', b(handle));
+      else if (skipped) line.append('LOCAL RUNS ONLY');
+      el.identityBtn.textContent = handle ? 'CHANGE' : 'SET USERNAME';
+      el.identityBtn.setAttribute('aria-label', handle ? 'Change username' : 'Set username');
+      show(el.identity, !!(handle || skipped));
+      el.identityPause.textContent = handle ? 'CHANGE USERNAME' : 'SET USERNAME';
+      show(el.identityPause, !!(handle || skipped));
+    },
+    /** Marks everything but the open overlay inert (and hides the menu panel it came from). */
+    setCovered(on) {
+      root.classList.toggle('overlay-open', on);
+      for (const n of background) {
+        if (!n) continue;
+        if (on) n.setAttribute('inert', ''); else n.removeAttribute('inert');
+      }
+    },
+    /** One polite announcement (a finished save, or an error). */
+    announce(text) {
+      // Cleared first, so the same words twice are still read twice.
+      el.live.textContent = '';
+      setTimeout(() => { el.live.textContent = text; }, 50);
     },
     hideOver() { show(el.over, false); },
     /**
@@ -212,7 +267,7 @@ export function createUI({ prefs, onPlay, onAgain, onPauseToggle, onMuteToggle, 
      * viewport CSS px, measured invisibly when it is still hidden. Pass no data to keep the text.
      */
     measureOver(data = null) {
-      if (data) fillOver(data);
+      if (data) { fillOver(data); if ('status' in data) this.setRunStatus(data.status); }
       const o = el.over, hidden = o.hidden;
       if (hidden) { o.style.visibility = 'hidden'; o.hidden = false; }
       const r = o.getBoundingClientRect();

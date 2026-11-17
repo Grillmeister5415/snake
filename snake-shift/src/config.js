@@ -71,6 +71,21 @@ export const FX = Object.freeze({
 
 export const STORAGE_KEY = 'snake-shift/v1';
 
+// URL parameters that make a run practice (LEADERBOARD_PLAN A9): never ranked, own local best.
+// Checked by raw presence, not by parsed value: `?seed=` or `?start=abc` change nothing in play,
+// but any attempted override counts. `nogl` is not here: it changes the rendering only.
+export const PRACTICE_PARAMS = Object.freeze([
+  'auto', 'debug', 'seed', 'start', 'ramp', 'cap',
+  'universe', 'scene', 'lock', 'look', 'score', 'lives',
+]);
+
+/** The practice parameters present in a location.search string, in PRACTICE_PARAMS order. */
+export function practiceParams(search = '') {
+  let p;
+  try { p = new URLSearchParams(search); } catch { return []; }
+  return PRACTICE_PARAMS.filter((k) => p.has(k));
+}
+
 function num(params, key, fallback) {
   if (!params.has(key)) return fallback;
   const v = Number(params.get(key));

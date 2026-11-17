@@ -2,7 +2,7 @@
 
 Written on 17 November 2026 from the Snake project. This is everything Snake needs from Tichu, to be done as a Tichu task through Tichu's own repository and release process.
 
-**Status (17 November 2026):** filed the same day as Tichu task T407, decision 0104, [pull request 160](https://github.com/Grillmeister5415/tichu/pull/160). Merged and released the same day on the owner's yes (Tichu's release 46, 08:50 UTC). The rest of this file is kept as the record of what was asked.
+**Status (17 November 2026):** filed the same day as Tichu task T407, decision 0104, [pull request 160](https://github.com/Grillmeister5415/tichu/pull/160). Merged and released the same day on the owner's yes (Tichu's release 46, 08:50 UTC). The rest of this file is kept as the record of what was asked. Since then Snake has prepared a leaderboard with its own API container and small JSON request bodies; nothing changes for Tichu, see [TICHU_NOTE_LEADERBOARD.md](TICHU_NOTE_LEADERBOARD.md).
 
 ## What Snake is
 

@@ -1,5 +1,9 @@
 // Keyboard by physical position (event.code) and swipes on the stage.
 // Input only ever reaches the simulation through queueTurn (in main.js).
+// Every key is first decided by nav.routeKey: nothing reaches the game from a text field, during
+// IME composition, with a modifier, or while a menu overlay is open (LEADERBOARD_PLAN A8, B1-2).
+
+import { routeKey } from './nav.js';
 
 const KEYS = {
   ArrowUp: 'up', KeyW: 'up',
@@ -30,40 +34,55 @@ export function steerFor(dir, view, heading) {
   return null;
 }
 
-export function createInput({ stage, pad = null, onDir, onTap = null, onPause, onConfirm, onMute }) {
-  function isControl(el) {
-    return el && (el.tagName === 'BUTTON' || el.tagName === 'INPUT' || el.tagName === 'LABEL' || el.tagName === 'A');
-  }
+// Input types that take text (anything else, such as a checkbox, is a control).
+const NOT_TEXT = new Set(['checkbox', 'radio', 'button', 'submit', 'reset', 'range', 'color', 'file', 'image', 'hidden']);
 
+/** True for elements where keys mean typing or choosing: text inputs, textarea, select, contenteditable. */
+export function isEditable(el) {
+  if (!el || typeof el !== 'object') return false;
+  const tag = typeof el.tagName === 'string' ? el.tagName.toUpperCase() : '';
+  if (tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  if (tag === 'INPUT') return !NOT_TEXT.has(String(el.type || 'text').toLowerCase());
+  return !!el.isContentEditable;
+}
+
+/** True for focused controls that handle Enter and Space themselves. */
+export function isControl(el) {
+  if (!el || typeof el !== 'object') return false;
+  const tag = typeof el.tagName === 'string' ? el.tagName.toUpperCase() : '';
+  return tag === 'BUTTON' || tag === 'INPUT' || tag === 'LABEL' || tag === 'A' || tag === 'SELECT' || tag === 'SUMMARY';
+}
+
+/** The facts routeKey needs about a keydown, read once from the event. */
+export function describeKey(e, active = null) {
+  const target = e.target && e.target !== globalThis.window ? e.target : active;
+  return {
+    code: e.code,
+    repeat: !!e.repeat,
+    composing: !!e.isComposing || e.keyCode === 229,
+    ctrl: !!e.ctrlKey, meta: !!e.metaKey, alt: !!e.altKey,
+    editable: isEditable(target) || isEditable(active),
+    control: !!active && active !== (globalThis.document && globalThis.document.body) && isControl(active),
+  };
+}
+
+/**
+ * state(): { mode, overlay } from main.js; without it every key is read as in play (the old
+ * behaviour, which the steering tests rely on). onBack: Escape while an overlay is open.
+ */
+export function createInput({
+  stage, pad = null, onDir, onTap = null, onPause, onConfirm, onMute, onBack = () => {},
+  state = () => ({ mode: 'playing', overlay: 'none' }),
+}) {
   function keydown(e) {
-    if (e.metaKey || e.ctrlKey || e.altKey) return;
-    const dir = KEYS[e.code];
-    if (dir) {
-      e.preventDefault();
-      onDir(dir, 'key');
-      return;
-    }
-    if (e.repeat) return;
-    switch (e.code) {
-      case 'KeyP':
-      case 'Escape':
-        e.preventDefault();
-        onPause();
-        break;
-      case 'Enter':
-      case 'NumpadEnter':
-      case 'Space':
-        // Let a focused button or switch handle its own activation.
-        if (isControl(document.activeElement) && document.activeElement !== document.body) return;
-        e.preventDefault();
-        onConfirm();
-        break;
-      case 'KeyM':
-        e.preventDefault();
-        onMute();
-        break;
-      default:
-    }
+    const active = globalThis.document ? globalThis.document.activeElement : null;
+    const { action, prevent } = routeKey(describeKey(e, active), state());
+    if (prevent) e.preventDefault();
+    if (action === 'dir') onDir(KEYS[e.code], 'key');
+    else if (action === 'pause') onPause();
+    else if (action === 'confirm') onConfirm();
+    else if (action === 'mute') onMute();
+    else if (action === 'back') onBack();
   }
   window.addEventListener('keydown', keydown);
 

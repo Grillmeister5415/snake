@@ -7,3 +7,7 @@ node_modules/
 SNAKE_SHIFT_REFERENCE_PACKAGE/references/
 # Other mood-board image folders: kept on disk, not tracked
 SNAKE_SHIFT_*/*.png
+# The leaderboard's development database (node serve.mjs)
+snake-shift/.data/
+# Leaderboard review screenshots: kept on disk, not tracked
+snake-shift/notes/leaderboard-shots/

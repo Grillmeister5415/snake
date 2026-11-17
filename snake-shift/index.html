@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
   <meta name="theme-color" content="#050308">
   <meta name="description" content="SNAKE//SHIFT: classic Snake. Every dot breaks time.">
   <title>SNAKE//SHIFT</title>
@@ -47,11 +47,15 @@
       <p>This game uses rapid flashing, strobe bursts, full-screen colour inversion and violent scene cuts. If you or anyone watching has photosensitive epilepsy or is sensitive to flashing light, switch on <em>Reduced flash</em> before you play.</p>
     </div>
     <div class="switches">
-      <label class="switch"><input type="checkbox" data-pref="reducedFlash"><span class="knob"></span><span class="lbl">Reduced flash<small>no strobes, no inversions, gentle cuts</small></span></label>
-      <label class="switch"><input type="checkbox" data-pref="reducedMotion"><span class="knob"></span><span class="lbl">Reduced motion<small>slow scenery, no first-person view</small></span></label>
+      <label class="switch"><input type="checkbox" data-pref="reducedFlash"><span class="knob"></span><span class="lbl">Reduced flash<small>no strobes, no inversions &middot; not ranked</small></span></label>
+      <label class="switch"><input type="checkbox" data-pref="reducedMotion"><span class="knob"></span><span class="lbl">Reduced motion<small>no first-person view &middot; not ranked</small></span></label>
       <label class="switch"><input type="checkbox" data-pref="reducedAudio"><span class="knob"></span><span class="lbl">Calmer sound<small>fewer tension effects, music stays</small></span></label>
     </div>
     <button id="btn-play" class="big" type="button" disabled>[ PLAY ]</button>
+    <div class="menu-row title-menu">
+      <button id="btn-board-title" class="sub" type="button">[ LEADERBOARD ]</button>
+    </div>
+    <p id="identity" class="identity" hidden><span id="identity-text"></span> <button id="btn-identity" class="link" type="button">CHANGE</button></p>
     <p id="loading" class="keys">LOADING TIMELINES&hellip;</p>
     <p class="keys"><span class="for-keys">ARROWS / WASD &middot; SWIPE &middot; P PAUSE &middot; M MUTE</span><span class="for-touch">SWIPE TO STEER &middot; II PAUSES</span></p>
   </section>
@@ -59,22 +63,102 @@
   <section id="paused" class="panel" hidden aria-labelledby="paused-h">
     <h2 id="paused-h">PAUSED</h2>
     <div class="switches">
-      <label class="switch"><input type="checkbox" data-pref="reducedFlash"><span class="knob"></span><span class="lbl">Reduced flash<small>no strobes, no inversions, gentle cuts</small></span></label>
-      <label class="switch"><input type="checkbox" data-pref="reducedMotion"><span class="knob"></span><span class="lbl">Reduced motion<small>slow scenery, no first-person view</small></span></label>
+      <label class="switch"><input type="checkbox" data-pref="reducedFlash"><span class="knob"></span><span class="lbl">Reduced flash<small>no strobes, no inversions &middot; not ranked</small></span></label>
+      <label class="switch"><input type="checkbox" data-pref="reducedMotion"><span class="knob"></span><span class="lbl">Reduced motion<small>no first-person view &middot; not ranked</small></span></label>
       <label class="switch"><input type="checkbox" data-pref="reducedAudio"><span class="knob"></span><span class="lbl">Calmer sound<small>fewer tension effects, music stays</small></span></label>
       <label class="switch"><input type="checkbox" data-pref="dpad"><span class="knob"></span><span class="lbl">Touch buttons<small>on-screen arrows instead of swipes</small></span></label>
     </div>
     <button id="btn-resume" class="big" type="button">[ RESUME ]</button>
+    <div class="menu-row">
+      <button id="btn-board-pause" class="sub" type="button">[ LEADERBOARD ]</button>
+      <button id="btn-identity-pause" class="sub" type="button" hidden>CHANGE USERNAME</button>
+    </div>
     <p class="keys">P / ESC TO RESUME</p>
   </section>
 
   <section id="over" class="panel" hidden aria-labelledby="over-h">
     <h2 id="over-h" class="collapsed">REALITY COLLAPSED</h2>
     <p class="final">SCORE <b id="over-score">0</b> <span class="sep">/</span> BEST <b id="over-best">0</b></p>
-    <p id="over-new" class="new" hidden>NEW BEST</p>
+    <p id="over-new" class="new" hidden>NEW PERSONAL BEST.</p>
     <button id="btn-again" class="big" type="button">[ AGAIN? ]</button>
+    <div class="menu-row">
+      <button id="btn-board-over" class="sub" type="button">[ LEADERBOARD ]</button>
+      <button id="btn-menu" class="sub" type="button">[ MENU ]</button>
+    </div>
+    <!-- Fixed height: a status that changes later never moves the buttons above it. -->
+    <div id="over-status" class="run-status">
+      <p id="over-status-text"></p>
+      <p id="over-wall" class="wall"></p>
+    </div>
     <p class="keys">ENTER / SPACE</p>
   </section>
+
+  <section id="username" class="panel username" role="dialog" aria-modal="true" aria-labelledby="username-h" hidden>
+    <form id="username-form" novalidate autocomplete="off">
+      <h2 id="username-h" class="username-h" tabindex="-1"><label for="username-input">USERNAME</label></h2>
+      <div class="username-field">
+        <input id="username-input" name="username" type="text" inputmode="text" autocomplete="nickname"
+          autocapitalize="characters" autocorrect="off" spellcheck="false" enterkeyhint="go"
+          aria-describedby="username-rule username-error">
+        <button id="username-shuffle" class="shuffle" type="button" aria-label="Suggest another username" title="Suggest another">&#x21bb;</button>
+      </div>
+      <p id="username-rule" class="username-rule"></p>
+      <p id="username-error" class="username-error" hidden></p>
+      <p id="username-note" class="username-note">Saved on this browser.</p>
+      <button id="username-submit" class="big" type="submit">[ LET ME IN ]</button>
+      <div class="menu-row">
+        <button id="username-skip" class="sub" type="button">SKIP</button>
+        <button id="username-back" class="sub" type="button">BACK</button>
+      </div>
+    </form>
+  </section>
+
+  <section id="board" class="board" role="dialog" aria-modal="true" aria-labelledby="board-h" hidden>
+    <header class="board-head">
+      <p class="board-kicker">SNAKE//SHIFT</p>
+      <svg class="board-snake" viewBox="0 0 22 10" aria-hidden="true" focusable="false" shape-rendering="crispEdges">
+        <path fill="#ffd400" d="M0 6h3v3H0zM3 4h3v3H3zM6 5h3v3H6zM9 6h3v3H9zM12 5h3v3h-3zM15 3h3v3h-3zM16 0h6v6h-6z"/>
+        <path fill="#080610" d="M17 2h1v1h-1zM20 2h1v1h-1z"/>
+      </svg>
+      <h2 id="board-h" class="board-title" tabindex="-1">HALL OF <span>SHIFTERS</span></h2>
+      <p class="board-tag"><span>EAT DOTS. LEAVE A LEGEND.</span></p>
+      <div class="board-tabs" role="tablist" aria-label="Period">
+        <button id="tab-all-time" type="button" role="tab" data-period="all-time" aria-selected="true" aria-controls="board-scroll">ALL TIME</button>
+        <button id="tab-week" type="button" role="tab" data-period="week" aria-selected="false" aria-controls="board-scroll" tabindex="-1">THIS WEEK</button>
+      </div>
+    </header>
+    <div class="board-list">
+      <div id="board-scroll" class="board-scroll" role="tabpanel" tabindex="0" aria-labelledby="tab-all-time">
+        <table class="board-table">
+          <caption id="board-caption" class="vh">Top ten, all time</caption>
+          <colgroup><col class="c-rank"><col class="c-name"><col class="c-score"></colgroup>
+          <thead><tr><th scope="col">RANK</th><th scope="col">USERNAME</th><th scope="col">SCORE</th></tr></thead>
+          <tbody id="board-rows"></tbody>
+        </table>
+        <p id="board-state" class="board-state" hidden></p>
+      </div>
+      <p id="board-more" class="board-more" aria-hidden="true">&#9660; MORE &#9660;</p>
+    </div>
+    <footer class="board-foot">
+      <div id="board-you" class="board-you" hidden>
+        <p class="board-you-label" id="board-you-label">YOUR POSITION</p>
+        <table class="board-table" aria-labelledby="board-you-label">
+          <colgroup><col class="c-rank"><col class="c-name"><col class="c-score"></colgroup>
+          <tbody><tr id="board-you-row"></tr></tbody>
+        </table>
+      </div>
+      <p id="board-rival" class="board-rival" hidden></p>
+      <p id="board-note" class="board-note" hidden><span id="board-note-text"></span> <button id="board-retry" class="link" type="button" hidden>RETRY</button></p>
+      <button id="board-set-name" class="link board-set-name" type="button" hidden>SET USERNAME</button>
+      <div class="board-actions">
+        <button id="board-back" class="board-btn" type="button">[ BACK ]</button>
+        <button id="board-main" class="board-btn primary" type="button">[ PLAY AGAIN ]</button>
+      </div>
+      <p class="board-foot-line"><span>NO COINS. JUST EGO.</span></p>
+    </footer>
+  </section>
+
+  <p id="live" class="vh" aria-live="polite"></p>
 
   <script type="module" src="src/main.js"></script>
 </body>
