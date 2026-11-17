@@ -204,7 +204,8 @@ export function crashLayout(ctx, L, snap) {
     return [{ x: (L.w - pw) / 2, y: (L.h - ph) / 2, w: pw, h: ph }];
   })() : [];
   const pad = Math.max(16, Math.round(L.w * 0.03));
-  const top = CRASH_HUD, bottom = L.h - CRASH_FOOT;
+  // The hint and d-pad are hidden on the final crash, so its text may use the bottom strip.
+  const top = CRASH_HUD, bottom = L.h - (snap.alive === false ? 12 : CRASH_FOOT);
   const big = Math.max(12, Math.min(24, Math.round(Math.min(L.w, L.h) * 0.034)));
   let fallback = null;
   for (const avoid of panel.length ? [[...clear, ...panel], clear] : [clear]) {
