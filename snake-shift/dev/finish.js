@@ -210,14 +210,14 @@ export function spyAudio() {
 export function audioOrder() {
   const L = window.__alog.filter((k) => !['beat', 'debug', 'setChaos', 'muted', 'setMuted'].includes(k)), bad = [];
   for (let i = 0; i < L.length; i++) {
-    if (L[i] === 'eat') { // ... setScore [setLives lifeGained] shift eat
-      if (L[i - 1] !== 'shift') bad.push(i + ': eat after ' + L[i - 1]);
-      const j = L[i - 2] === 'lifeGained' ? i - 4 : i - 2;
-      if (L[j] !== 'setScore') bad.push(i + ': no setScore before shift (' + L.slice(Math.max(0, i - 4), i + 1) + ')');
+    if (L[i] === 'bite') { // ... setGameplay [setLives lifeGained] bite
+      const j = L[i - 1] === 'lifeGained' ? i - 3 : i - 1;
+      if (L[i - 1] === 'lifeGained' && L[i - 2] !== 'setLives') bad.push(i + ': lifeGained without setLives');
+      if (L[j] !== 'setGameplay') bad.push(i + ': no setGameplay before bite (' + L.slice(Math.max(0, i - 4), i + 1) + ')');
     }
     if (L[i] === 'lifeLost' && L[i - 1] !== 'setLives') bad.push(i + ': lifeLost after ' + L[i - 1]);
     if (L[i] === 'die' && L[i - 1] !== 'setLives') bad.push(i + ': die after ' + L[i - 1]);
-    if (['cut', 'setTimeline', 'stop'].includes(L[i]) && L[i] !== 'stop') bad.push(i + ': old call ' + L[i]);
+    if (['cut', 'setTimeline', 'eat', 'setScore'].includes(L[i])) bad.push(i + ': old call ' + L[i]);
   }
   const count = {}; for (const k of L) count[k] = (count[k] || 0) + 1;
   return { calls: L.length, count, bad: bad.slice(0, 8), firstCalls: L.slice(0, 8).join(' ') };

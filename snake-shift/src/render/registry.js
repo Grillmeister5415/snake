@@ -65,6 +65,8 @@ const AUDIO_METHODS = [
   'unlock', 'setMuted', 'setTimeline', 'setChaos', 'eat', 'cut', 'die', 'start', 'stop',
   // LEVELS_PLAN 7.5
   'setScore', 'shift', 'setLook', 'setLives', 'lifeLost', 'lifeGained', 'respawned',
+  // SOUND_PLAN 2.3; debug() for the harness and ?debug checks
+  'setGameplay', 'bite', 'debug',
 ];
 
 function stubAudio(beat) {

@@ -10,8 +10,9 @@
   body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.4 ui-monospace, Menlo, monospace; padding: 16px; }
   h1 { font-size: 18px; margin: 0 0 4px; letter-spacing: .08em; }
   p.sub { margin: 0 0 16px; color: var(--dim); }
-  .grid { display: grid; grid-template-columns: minmax(0, 1fr) 300px; gap: 16px; }
-  @media (max-width: 760px) { .grid { grid-template-columns: 1fr; } }
+  a { color: var(--ok); }
+  .grid { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 16px; }
+  @media (max-width: 860px) { .grid { grid-template-columns: 1fr; } }
   section { background: var(--panel); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
   section h2 { font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: .12em; margin: 0 0 8px; }
   .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
@@ -20,26 +21,25 @@
   button:hover { border-color: var(--acc); }
   button.on { background: var(--acc); color: #000; border-color: var(--acc); }
   button.new { border-style: dashed; }
-  input[type=range] { width: min(260px, 60vw); }
-  #beatBox { display: grid; place-items: center; height: 160px; }
-  #pulse { width: 100px; height: 100px; border-radius: 12px; background: var(--acc); }
-  #dots { display: flex; gap: 8px; margin-top: 10px; justify-content: center; }
-  #dots span { width: 14px; height: 14px; border-radius: 50%; background: #2b2450; }
-  #dots span.lit { background: var(--ok); }
+  input[type=range] { width: min(240px, 60vw); }
+  #pulse { width: 80px; height: 80px; border-radius: 12px; background: var(--acc); margin: 8px auto; }
   #lives { letter-spacing: .2em; font-size: 18px; }
   pre { margin: 0; white-space: pre-wrap; font-size: 12px; }
   #log { max-height: 220px; overflow: auto; color: var(--dim); }
   #log .bad { color: var(--bad); } #log .ok { color: var(--ok); }
   table { border-collapse: collapse; font-size: 11px; width: 100%; }
-  td, th { padding: 2px 4px; text-align: right; border-bottom: 1px solid #2b2450; }
+  td, th { padding: 2px 4px; text-align: right; border-bottom: 1px solid #2b2450; white-space: nowrap; }
   th:first-child, td:first-child { text-align: left; }
-  td.bad { color: var(--bad); }
+  td.bad { color: var(--bad); } td.ok { color: var(--ok); }
   .tablewrap { overflow-x: auto; }
+  canvas { width: 100%; height: 160px; background: #0d0a1c; border-radius: 6px; display: block; }
+  .key span { margin-right: 12px; }
 </style>
 </head>
 <body>
 <h1>SNAKE//SHIFT — audio harness</h1>
-<p class="sub">Unlock first (needs a click). Space = bite (shift + eat). Nothing here touches game state. Dashed = new universes.</p>
+<p class="sub">Unlock first (needs a click). Pace and danger are independent. Space = bite into another world. Nothing here touches game state.
+Before and after at matched loudness: <a href="audio-compare.html">audio-compare.html</a>.</p>
 <div class="grid">
   <div>
     <section>
@@ -47,26 +47,20 @@
       <div class="row">
         <button id="unlock">UNLOCK</button>
         <button id="start">START RHYTHM</button>
-        <button id="stop">STOP</button>
+        <button id="stop">STOP (pause)</button>
         <button id="mute">MUTE</button>
-        <button id="demo">DEMO RUN</button>
-      </div>
-      <div class="row">
-        <button id="check">SCHEDULE CHECK (offline)</button>
-        <button id="peak">PEAK TEST (offline render)</button>
-        <button id="bpm">MEASURE BPM</button>
+        <label><input id="ra" type="checkbox"> calmer sound (reducedAudio)</label>
+        <label><input id="rf" type="checkbox"> reduced flash</label>
+        <label><input id="rm" type="checkbox"> reduced motion</label>
       </div>
     </section>
     <section>
-      <h2>Score → stage → tempo, layers</h2>
-      <div class="row">
-        <label>score <input id="score" type="range" min="0" max="60" step="1" value="0"></label>
-        <span id="scoreVal">0</span>
-      </div>
-      <div class="row"><span id="stageInfo"></span></div>
+      <h2>Pace and danger (independent)</h2>
+      <div class="row"><label>pace <input id="pace" type="range" min="0" max="1" step="0.01" value="0"></label><span id="paceVal"></span></div>
+      <div class="row"><label>danger (raw pressure) <input id="danger" type="range" min="0" max="1" step="0.01" value="0"></label><span id="dangerVal"></span></div>
     </section>
     <section>
-      <h2>Universe (click = shift into it, a drop)</h2>
+      <h2>Universe (click = bite into it)</h2>
       <div class="row" id="universes"></div>
       <div class="row">
         <span>look</span>
@@ -74,19 +68,12 @@
         <button data-look="3d" class="look">3d</button>
         <button data-look="pov" class="look">pov</button>
         <label><input id="swing" type="checkbox"> swing (brightness)</label>
-        <label><input id="legacy" type="checkbox"> legacy path (setTimeline + cut, no drop)</label>
       </div>
-    </section>
-    <section>
-      <h2>Events</h2>
       <div class="row">
-        <button id="bite">BITE (next universe)</button>
-        <button id="held">HELD BITE (same universe)</button>
-        <button id="eat">EAT only</button>
-        <button id="cut">CUT</button>
-        <button id="swingcut">CUT (swing)</button>
-        <button id="die">DIE</button>
-        <button id="reset">SCORE = 0</button>
+        <button id="bite">BITE (next world)</button>
+        <button id="held">HELD BITE</button>
+        <button id="shiftOnly">SHIFT (no bite)</button>
+        <button id="die">GAME OVER</button>
       </div>
     </section>
     <section>
@@ -96,21 +83,28 @@
         <button id="lifeLost">LIFE LOST</button>
         <button id="respawn">RESPAWN (first move)</button>
         <button id="lifeGained">LIFE GAINED</button>
-        <button id="livesDown">lives −</button>
-        <button id="livesUp">lives +</button>
       </div>
     </section>
     <section>
-      <h2>Chaos &amp; prefs</h2>
+      <h2>Scenarios (SOUND_PLAN 4.1)</h2>
+      <div class="tablewrap"><table id="scTable"></table></div>
       <div class="row">
-        <label>chaos <input id="chaos" type="range" min="0" max="1" step="0.01" value="0"></label>
-        <span id="chaosVal">0.00</span>
-        <label><input id="rf" type="checkbox"> reduced flash</label>
-        <label><input id="rm" type="checkbox"> reduced motion</label>
+        <button id="checks">RUN ALL CHECKS (4.3, offline)</button>
+        <button id="playRender" disabled>PLAY LAST RENDER</button>
+        <button id="stopRender">STOP PLAYBACK</button>
       </div>
     </section>
     <section>
-      <h2>Schedule check</h2>
+      <h2>Raw pressure and smoothed danger (last render)</h2>
+      <canvas id="plot" width="900" height="160"></canvas>
+      <p class="sub key"><span style="color:#ff9f40">raw pressure</span><span style="color:#3dffb0">smoothed danger</span><span style="color:#8a83a8">tense 0.40 / off 0.25</span><span style="color:#ff2bd6">| bites</span></p>
+    </section>
+    <section>
+      <h2>Metrics (offline renders)</h2>
+      <div class="tablewrap" id="metrics"><pre>none yet</pre></div>
+    </section>
+    <section>
+      <h2>Checks</h2>
       <div class="tablewrap" id="checkOut"><pre>not run</pre></div>
     </section>
     <section>
@@ -120,9 +114,8 @@
   </div>
   <div>
     <section>
-      <h2>Beat (beat.sample())</h2>
-      <div id="beatBox"><div id="pulse"></div></div>
-      <div id="dots"><span></span><span></span><span></span><span></span></div>
+      <h2>Beat</h2>
+      <div id="pulse"></div>
       <pre id="beatInfo"></pre>
     </section>
     <section>
@@ -132,19 +125,19 @@
   </div>
 </div>
 <script type="module">
-import { createAudio, TIMELINE_IDS, NEW_IDS, stageOf, stageBpm, musicPlan, ABYSS_CAP } from '../src/audio.js';
+import { createAudio, TIMELINE_IDS, NEW_IDS, tempoOf } from '../src/audio.js';
+import { SCENARIOS, geometryScenario, render, metrics, adapter, playLive, runChecks, BANDS } from './audio-scenarios.js';
+import { SPEED } from '../src/config.js';
 
-const prefs = { reducedFlash: false, reducedMotion: false };
+const prefs = { reducedFlash: false, reducedMotion: false, reducedAudio: false };
 const audio = createAudio(() => prefs);
 const $ = (id) => document.getElementById(id);
-const SPECIAL = ['lane', 'mushroom', 'castle'];
-let score = 0;
-let current = 'lcd';
-let look = '2d';
-let lives = 3;
+let current = 'lcd', look = '2d', lives = 3, score = 0, pace = 0;
 const errors = [];
+const results = {}; // scenario id → { metrics, samples, trace, buffer }
+let lastBuffer = null, playing = null, live = null;
 window.__audio = audio;
-window.__harness = { errors, prefs };
+window.__harness = { errors, prefs, results };
 
 function log(msg, cls = '') {
   const line = document.createElement('div');
@@ -155,50 +148,39 @@ function log(msg, cls = '') {
 addEventListener('error', (e) => { errors.push(String(e.message)); log('ERROR ' + e.message, 'bad'); });
 addEventListener('unhandledrejection', (e) => { errors.push(String(e.reason)); log('REJECTION ' + e.reason, 'bad'); });
 
-// ---- state helpers -------------------------------------------------------------
+// ---- live controls ---------------------------------------------------------------
 
+function gameFor(p) {
+  const s = Math.round(p * 37);
+  return { stepMs: SPEED.startMs - (SPEED.startMs - SPEED.capMs) * p, startMs: SPEED.startMs, capMs: SPEED.capMs, score: s, length: 3 + s };
+}
+function setPace(p) {
+  pace = p;
+  score = gameFor(p).score;
+  audio.setGameplay(gameFor(p));
+  $('paceVal').textContent = `${p.toFixed(2)} → ${tempoOf(p).toFixed(1)} BPM (score ${score})`;
+}
 function showUniverse(id) {
   current = id;
   for (const b of $('universes').children) b.classList.toggle('on', b.dataset.id === id);
 }
-function showLives() {
-  $('lives').textContent = '■'.repeat(lives) + '□'.repeat(5 - lives);
-}
-function setScore(n) {
-  score = Math.max(0, n | 0);
-  $('score').value = Math.min(60, score);
-  $('scoreVal').textContent = String(score);
-  audio.setScore(score);
-  const st = stageOf(score);
-  $('stageInfo').textContent = `stage ${st} · ${stageBpm(st)} BPM · ${musicPlan(st, current).layers.join(' ')}`;
-}
-function ensureRunning() {
-  if (!audio.beat.running) audio.start(); // the shell starts the music when the run starts
-}
+function showLives() { $('lives').textContent = '■'.repeat(lives) + '□'.repeat(5 - lives); }
+function ensureRunning() { if (!audio.beat.running) audio.start(); }
 
-// One bite, the new way: setScore → shift → eat (LEVELS_PLAN 7.5, notes/audio.md).
 function bite({ to = null, held = false } = {}) {
   ensureRunning();
-  setScore(score + 1);
+  score += 1;
+  audio.setGameplay({ ...gameFor(pace), score });
   const from = current;
   let next = held ? current : to;
   if (!next) {
     const pool = TIMELINE_IDS.filter((x) => x !== current && x !== 'lcd');
     next = pool[Math.floor(Math.random() * pool.length)];
   }
-  const swing = $('swing').checked;
-  if ($('legacy').checked) {
-    audio.setChaos(Math.min(1, score / 25));
-    audio.setTimeline(next);
-    audio.cut({ swing });
-  } else {
-    audio.shift({ from, to: next, look, swing });
-  }
-  audio.eat(score);
+  audio.bite({ score, from, to: next, look, prevLook: look, held, swing: $('swing').checked, reset: next === 'lcd' });
   showUniverse(next);
-  setScore(score); // refresh layer text for the new universe
-  const d = audio.debug().lastDrop;
-  log(`${held ? 'held ' : ''}bite ${from}→${next} score ${score}${d ? ` gap ${d.gapSteps}×16th (${d.gapMs} ms)${d.stutter ? ' stutter' : ''}` : ''}`);
+  const b = audio.debug().lastBite;
+  log(`bite ${from}→${next} score ${score}: ${b ? b.kind + (b.rapid ? ' rapid' : '') : ''}`);
 }
 
 for (const id of TIMELINE_IDS) {
@@ -214,185 +196,152 @@ for (const b of document.querySelectorAll('button.look')) {
     look = b.dataset.look;
     audio.setLook(look);
     document.querySelectorAll('button.look').forEach((x) => x.classList.toggle('on', x === b));
-    log('look ' + look);
   };
 }
 showUniverse('lcd');
 showLives();
-setScore(0);
+setPace(0);
 audio.setLives(lives);
 
 $('unlock').onclick = async () => log('unlock → ' + (await audio.unlock()) + ' (' + audio.debug().state + ')', 'ok');
 $('start').onclick = () => { audio.start(); log('start'); };
-$('stop').onclick = () => { audio.stop(); log('stop'); };
-$('mute').onclick = () => {
-  audio.setMuted(!audio.muted);
-  $('mute').classList.toggle('on', audio.muted);
-  log('muted ' + audio.muted);
-};
-$('score').oninput = (e) => setScore(+e.target.value);
+$('stop').onclick = () => { audio.setGameplay({ clear: true }); audio.stop(); log('stop'); };
+$('mute').onclick = () => { audio.setMuted(!audio.muted); $('mute').classList.toggle('on', audio.muted); };
+$('pace').oninput = (e) => setPace(+e.target.value);
+$('danger').oninput = (e) => { audio.setGameplay({ pressure: +e.target.value }); $('dangerVal').textContent = (+e.target.value).toFixed(2); };
 $('bite').onclick = () => bite();
 $('held').onclick = () => bite({ held: true });
-$('eat').onclick = () => { ensureRunning(); setScore(score + 1); audio.eat(score); };
-$('cut').onclick = () => { audio.cut({ swing: false }); log('cut'); };
-$('swingcut').onclick = () => { audio.cut({ swing: true }); log('cut swing'); };
-$('die').onclick = () => { audio.die(); log('die'); };
-$('reset').onclick = () => setScore(0);
+$('shiftOnly').onclick = () => {
+  const pool = TIMELINE_IDS.filter((x) => x !== current);
+  const to = pool[Math.floor(Math.random() * pool.length)];
+  audio.shift({ from: current, to, look });
+  showUniverse(to);
+};
+$('die').onclick = () => { audio.setGameplay({ clear: true }); audio.setLives(0); audio.die(); };
 $('lifeLost').onclick = () => {
   lives = Math.max(0, lives - 1);
+  audio.setGameplay({ clear: true });
   audio.setLives(lives);
   showLives();
-  if (lives === 0) { audio.die(); log('last life gone → die'); return; }
+  if (lives === 0) { audio.die(); return; }
   audio.lifeLost();
-  log(`life lost → ${lives} (waiting, muffled)`);
 };
-$('respawn').onclick = () => { audio.respawned(); log('respawned'); };
-$('lifeGained').onclick = () => {
-  lives = Math.min(5, lives + 1);
-  audio.setLives(lives);
-  audio.lifeGained();
-  showLives();
-  log('life gained → ' + lives);
-};
-$('livesDown').onclick = () => { lives = Math.max(0, lives - 1); audio.setLives(lives); showLives(); };
-$('livesUp').onclick = () => { lives = Math.min(5, lives + 1); audio.setLives(lives); showLives(); };
-$('chaos').oninput = (e) => { audio.setChaos(+e.target.value); $('chaosVal').textContent = (+e.target.value).toFixed(2); };
-$('rf').onchange = (e) => { prefs.reducedFlash = e.target.checked; };
-$('rm').onchange = (e) => { prefs.reducedMotion = e.target.checked; };
+$('respawn').onclick = () => audio.respawned();
+$('lifeGained').onclick = () => { lives = Math.min(5, lives + 1); audio.setLives(lives); audio.lifeGained(); showLives(); };
+for (const [id, key] of [['ra', 'reducedAudio'], ['rf', 'reducedFlash'], ['rm', 'reducedMotion']]) $(id).onchange = (e) => { prefs[key] = e.target.checked; };
 addEventListener('keydown', (e) => {
-  if (e.code === 'Space') { e.preventDefault(); bite(); }
+  if (e.code === 'Space' && e.target === document.body) { e.preventDefault(); bite(); }
   if (e.code.startsWith('Arrow') && audio.debug().waiting) audio.respawned();
 });
 
-// Demo: a bite every 2 beats; specials held for 4–6 bites; a life lost every 20 bites.
-let demo = null;
-let hold = 0;
-let respawnAt = 0;
-$('demo').onclick = () => {
-  if (demo) { clearInterval(demo); demo = null; $('demo').classList.remove('on'); return; }
-  $('demo').classList.add('on');
-  let lastBeat = -1;
-  demo = setInterval(() => {
-    const now = performance.now();
-    if (audio.debug().waiting) {
-      if (now > respawnAt) { audio.respawned(); log('demo respawn'); }
-      return;
-    }
-    const i = audio.beat.running ? audio.beat.index() : -2;
-    if (i === lastBeat || (i >= 0 && i % 2)) return;
-    lastBeat = i;
-    if (score > 0 && score % 20 === 0 && lives > 1) {
-      lives--; audio.setLives(lives); showLives(); audio.lifeLost(); respawnAt = now + 1800; score++; log('demo life lost');
-      return;
-    }
-    if (hold > 0) { hold--; look = ['2d', '3d', 'pov'][Math.floor(Math.random() * 3)]; bite({ held: true }); return; }
-    const special = Math.random() < 0.1;
-    const to = special ? SPECIAL[Math.floor(Math.random() * 3)] : null;
-    if (special) hold = 3 + Math.floor(Math.random() * 3);
-    look = Math.random() < 0.5 ? '2d' : Math.random() < 0.6 ? '3d' : 'pov';
-    bite({ to });
-  }, 20);
-};
+// ---- scenarios ---------------------------------------------------------------------
 
-// ---- verification: what is scheduled ---------------------------------------------
+let allScenarios = SCENARIOS.slice();
+geometryScenario().then((g) => { allScenarios.push(g); buildTable(); }, (e) => log('geometry scenario failed: ' + e, 'bad'));
 
-// For each universe × stage: tempo, layer count and voices over two bars, scheduled
-// into an OfflineAudioContext that is never rendered.
-$('check').onclick = async () => {
-  const ids = ['arcade', 'acid', 'lcd', 'abyss', 'lane', 'hangar', 'mushroom', 'castle', 'wrong'];
-  const rows = [];
-  let bad = 0;
+function buildTable() {
+  const t = $('scTable');
+  t.innerHTML = '<tr><th>#</th><th>scenario</th><th></th><th></th></tr>';
+  for (const sc of allScenarios) {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${sc.id}</td><td style="text-align:left;white-space:normal">${sc.name} (${sc.dur.toFixed(0)} s)</td>`;
+    const a = document.createElement('td'), b = document.createElement('td');
+    const liveBtn = document.createElement('button');
+    liveBtn.textContent = 'live';
+    liveBtn.onclick = async () => {
+      await audio.unlock();
+      if (live) live.stop();
+      Object.assign(prefs, { reducedAudio: false }, sc.prefs || {});
+      live = playLive(sc, adapter('new', audio, prefs));
+      log(`live: scenario ${sc.id}`);
+    };
+    const offBtn = document.createElement('button');
+    offBtn.textContent = 'render';
+    offBtn.onclick = () => renderOne(sc);
+    a.append(liveBtn); b.append(offBtn); tr.append(a, b);
+    t.append(tr);
+  }
+}
+buildTable();
+
+async function renderOne(sc) {
+  log(`rendering ${sc.id}…`);
+  const r = await render(sc, { createAudio, kind: 'new' });
+  const m = metrics(r.buffer, { samples: r.samples, debug: r.debug });
+  results[sc.id] = { ...r, metrics: m, sc };
+  lastBuffer = r.buffer;
+  $('playRender').disabled = false;
+  plot(r.samples, r.trace, sc.dur);
+  showMetrics();
+  log(`scenario ${sc.id}: ${m.lufs} LUFS, peak ${m.peak}, errors ${m.errors}`, m.errors ? 'bad' : 'ok');
+}
+
+function showMetrics() {
+  const ids = Object.keys(results);
+  let html = '<table><tr><th>#</th><th>LUFS</th><th>peak</th><th>crest dB</th><th>&gt;knee %</th>' + BANDS.map(([a, b]) => `<th>${a}–${b > 9000 ? '' : b} Hz %</th>`).join('') + '<th>voices</th><th>errors</th></tr>';
   for (const id of ids) {
-    for (let st = 0; st <= 10; st++) {
-      const off = new OfflineAudioContext(2, 441, 44100);
-      const a = createAudio(() => ({}), { context: off });
-      await a.unlock();
-      a.setScore(st * 5);
-      a.setTimeline(id);
-      const v0 = a.debug().voices;
-      const P = a.beat.period / 4;
-      for (let s = 16; s < 48; s++) a._step(s, 0.05 + (s - 16) * P);
-      const d = a.debug();
-      const wantLayers = id === 'lcd' ? 1 : id === 'abyss' ? Math.min(st, ABYSS_CAP) + 2 : st + 2;
-      const ok = d.bpm === stageBpm(st) && d.layerCount === wantLayers && d.errors === 0;
-      if (!ok) bad++;
-      rows.push({ id, st, bpm: d.bpm, layers: d.layerCount, voices: d.voices - v0, ok });
-    }
+    const m = results[id].metrics;
+    html += `<tr><td>${id}</td><td>${m.lufs}</td><td>${m.peak}</td><td>${m.crestDb}</td><td>${m.hotPct}</td>${m.bands.map((x) => `<td>${x}</td>`).join('')}<td>${m.maxVoices}</td><td class="${m.errors ? 'bad' : 'ok'}">${m.errors}</td></tr>`;
   }
-  window.__check = { rows, bad };
-  const byId = {};
-  for (const r of rows) (byId[r.id] ||= []).push(r);
-  let html = '<table><tr><th>universe</th>' + Array.from({ length: 11 }, (_, s) => `<th>${s}</th>`).join('') + '</tr>';
-  html += '<tr><td>BPM</td>' + byId.arcade.map((r) => `<td>${r.bpm}</td>`).join('') + '</tr>';
-  for (const id of ids) {
-    html += `<tr><td>${id} layers/voices</td>` + byId[id].map((r) => `<td class="${r.ok ? '' : 'bad'}">${r.layers}/${r.voices}</td>`).join('') + '</tr>';
+  $('metrics').innerHTML = html + '</table>';
+}
+
+function plot(samples, trace, dur) {
+  const c = $('plot'), g = c.getContext('2d');
+  const W = c.width, H = c.height;
+  g.clearRect(0, 0, W, H);
+  const x = (t) => (t / dur) * W, y = (v) => H - 6 - v * (H - 12);
+  g.strokeStyle = '#3a3166';
+  for (const v of [0.25, 0.4]) { g.beginPath(); g.moveTo(0, y(v)); g.lineTo(W, y(v)); g.stroke(); }
+  g.strokeStyle = '#ff2bd6';
+  for (const e of trace) if (e.bite) { g.beginPath(); g.moveTo(x(e.t), 0); g.lineTo(x(e.t), H); g.stroke(); }
+  for (const [key, col] of [['raw', '#ff9f40'], ['danger', '#3dffb0']]) {
+    g.strokeStyle = col;
+    g.beginPath();
+    samples.forEach((s, i) => (i ? g.lineTo(x(s.t), y(s[key] || 0)) : g.moveTo(x(s.t), y(s[key] || 0))));
+    g.stroke();
   }
-  $('checkOut').innerHTML = html + '</table>';
-  log(`schedule check: ${rows.length} cases, ${bad} bad`, bad ? 'bad' : 'ok');
+}
+
+$('playRender').onclick = async () => {
+  await audio.unlock();
+  const ctx = new AudioContext();
+  if (playing) playing.stop();
+  const s = ctx.createBufferSource();
+  s.buffer = lastBuffer;
+  s.connect(ctx.destination);
+  s.start();
+  playing = s;
+};
+$('stopRender').onclick = () => { if (playing) playing.stop(); playing = null; if (live) live.stop(); live = null; };
+
+$('checks').onclick = async () => {
+  $('checkOut').innerHTML = '<pre>running…</pre>';
+  const r = await runChecks(createAudio, { log: (m) => log(m, m.startsWith('PASS') ? 'ok' : 'bad') });
+  for (const [id, x] of Object.entries(r.renders)) results[id] = { ...x, sc: x.sc };
+  showMetrics();
+  if (r.renders['2']) plot(r.renders['2'].samples, r.renders['2'].trace, r.renders['2'].sc.dur);
+  r.consoleErrors = errors.length;
+  window.__checks = r;
+  $('checkOut').innerHTML = '<table><tr><th>check</th><th>result</th><th>value</th></tr>' +
+    r.checks.map((c) => `<tr><td>${c.id} — ${c.name}</td><td class="${c.pass ? 'ok' : 'bad'}">${c.pass ? 'pass' : 'FAIL'}</td><td style="text-align:left;white-space:normal">${JSON.stringify(c.value)}</td></tr>`).join('') +
+    `<tr><td>browser console errors on this page</td><td class="${errors.length ? 'bad' : 'ok'}">${errors.length ? 'FAIL' : 'pass'}</td><td>${errors.length}</td></tr></table>`;
 };
 
-// Busiest case, rendered: stage 10, last life (heartbeat + detune), hunger full,
-// first person (drone), heavy drop, every bite voice and the life figure at once,
-// and four kits' full bars stacked on top of each other for two bars.
-$('peak').onclick = async () => {
-  const sr = 44100;
-  const off = new OfflineAudioContext(2, sr * 5, sr);
-  const a = createAudio(() => ({}), { context: off });
-  await a.unlock();
-  a.setScore(55);
-  a.setLives(1);
-  a.setChaos(1);
-  a.start();
-  a.setTimeline('bunker');
-  a.shift({ from: 'bunker', to: 'hangar', look: 'pov', swing: true });
-  a._dials(0.2, 1); // riser at full hunger, after the drop released it
-  for (const id of TIMELINE_IDS) { a.setTimeline(id); a.eat(7); }
-  a.lifeGained();
-  const P = a.beat.period / 4;
-  for (const id of ['bunker', 'kombat', 'disco', 'hangar']) {
-    a.setTimeline(id);
-    for (let s = 0; s < 32; s++) a._step(48 + s, 0.25 + s * P);
-  }
-  const buf = await off.startRendering();
-  a.stop();
-  let peak = 0, sum = 0, n = 0, hot = 0;
-  for (let ch = 0; ch < buf.numberOfChannels; ch++) {
-    const d = buf.getChannelData(ch);
-    for (let i = 0; i < d.length; i++) { const v = Math.abs(d[i]); if (v > peak) peak = v; if (v > 0.8) hot++; sum += v * v; n++; }
-  }
-  const res = { peak: +peak.toFixed(4), rms: +Math.sqrt(sum / n).toFixed(4), hotPct: +((100 * hot) / n).toFixed(2), voices: a.debug().voices, errors: a.debug().errors };
-  window.__peak = res;
-  log('peak test ' + JSON.stringify(res), peak < 1 && res.errors === 0 ? 'ok' : 'bad');
-};
-
-// Tempo measured from the beat clock against wall time (works with a hidden pane).
-$('bpm').onclick = () => {
-  if (!audio.beat.running) audio.start();
-  const p0 = audio.beat.position();
-  const t0 = performance.now();
-  setTimeout(() => {
-    const bpm = ((audio.beat.position() - p0) / ((performance.now() - t0) / 60000));
-    window.__harness.measuredBpm = bpm;
-    log(`measured ${bpm.toFixed(1)} BPM (target ${audio.beat.bpm})`, Math.abs(bpm - audio.beat.bpm) < 1.5 ? 'ok' : 'bad');
-  }, 2000);
-};
-
-// ---- live view ------------------------------------------------------------------
+// ---- live view -----------------------------------------------------------------------
 
 function frame() {
   const s = audio.beat.sample();
-  const p = s.pulse;
-  $('pulse').style.transform = `scale(${0.4 + 0.6 * p})`;
-  $('pulse').style.opacity = String(0.25 + 0.75 * p);
-  [...$('dots').children].forEach((d, i) => d.classList.toggle('lit', audio.beat.running && s.index % 4 === i));
+  $('pulse').style.transform = `scale(${0.4 + 0.6 * s.pulse})`;
+  $('pulse').style.opacity = String(0.25 + 0.75 * s.pulse);
   requestAnimationFrame(frame);
 }
 requestAnimationFrame(frame);
 setInterval(() => {
   const s = audio.beat.sample();
-  $('beatInfo').textContent = `index ${s.index}  phase ${s.phase.toFixed(2)}  pulse ${s.pulse.toFixed(2)}\n${audio.beat.bpm} BPM`;
+  $('beatInfo').textContent = `beat ${s.index}  phase ${s.phase.toFixed(2)}\n${audio.beat.bpm.toFixed(1)} BPM`;
   const d = audio.debug();
-  $('status').textContent = JSON.stringify({ ...d, lastDrop: d.lastDrop && { ...d.lastDrop, impact: undefined } }, null, 1);
+  $('status').textContent = JSON.stringify(d, null, 1);
 }, 250);
 </script>
 </body>

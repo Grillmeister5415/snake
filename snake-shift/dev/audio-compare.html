@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SNAKE//SHIFT before and after</title>
+<style>
+  :root { --bg: #08060f; --fg: #e8e4ff; --dim: #8a83a8; --acc: #ff2bd6; --ok: #3dffb0; --bad: #ff4b4b; --panel: #15112a; }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 14px/1.4 ui-monospace, Menlo, monospace; padding: 16px; }
+  h1 { font-size: 18px; margin: 0 0 4px; letter-spacing: .08em; }
+  p.sub { margin: 0 0 16px; color: var(--dim); max-width: 70ch; }
+  a { color: var(--ok); }
+  section { background: var(--panel); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
+  section h2 { font-size: 12px; color: var(--dim); text-transform: uppercase; letter-spacing: .12em; margin: 0 0 8px; }
+  .row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+  .row + .row { margin-top: 8px; }
+  button, select { background: #241d45; color: var(--fg); border: 1px solid #3a3166; border-radius: 6px; padding: 7px 10px; font: inherit; cursor: pointer; max-width: 100%; }
+  button.on { background: var(--acc); color: #000; border-color: var(--acc); }
+  table { border-collapse: collapse; font-size: 12px; }
+  td, th { padding: 3px 8px; text-align: right; border-bottom: 1px solid #2b2450; white-space: nowrap; }
+  th:first-child, td:first-child { text-align: left; }
+  .tablewrap { overflow-x: auto; }
+  pre { margin: 0; white-space: pre-wrap; font-size: 12px; color: var(--dim); }
+</style>
+</head>
+<body>
+<h1>SNAKE//SHIFT — before and after</h1>
+<p class="sub">Renders one scenario with the engine at commit 184b3c8 (<code>dev/legacy/audio.legacy.js</code>) and with the new one,
+offline, with fixed seeds. The louder render is turned down to the loudness of the quieter one (integrated, K-weighted),
+so A/B is at matched loudness. Nothing is saved; the WAV links are made in the browser. Harness: <a href="audio.html">audio.html</a>.</p>
+<section>
+  <h2>Scenario</h2>
+  <div class="row">
+    <select id="sc"></select>
+    <button id="go">RENDER BOTH</button>
+    <button id="all">METRICS FOR ALL</button>
+  </div>
+  <div class="row">
+    <button id="playA" disabled>PLAY BEFORE (legacy)</button>
+    <button id="playB" disabled>PLAY AFTER (new)</button>
+    <button id="toggle" disabled>A/B SWITCH (keeps position)</button>
+    <button id="stop">STOP</button>
+    <span id="now"></span>
+  </div>
+  <div class="row" id="dl"></div>
+</section>
+<section>
+  <h2>Metrics</h2>
+  <div class="tablewrap" id="out"><pre>not rendered</pre></div>
+</section>
+<script type="module">
+import { SCENARIOS, geometryScenario, render, metrics, wav, BANDS } from './audio-scenarios.js';
+import { createAudio as createNew } from '../src/audio.js';
+import { createAudio as createOld } from './legacy/audio.legacy.js';
+
+const $ = (id) => document.getElementById(id);
+const list = SCENARIOS.slice();
+geometryScenario().then((g) => { list.push(g); fill(); });
+function fill() { $('sc').innerHTML = list.map((s) => `<option value="${s.id}">${s.id} — ${s.name}</option>`).join(''); }
+fill();
+
+let ctx = null, cur = null, pair = null, which = null, t0 = 0, off0 = 0;
+window.__compare = { results: {} };
+
+async function both(sc) {
+  const A = await render(sc, { createAudio: createOld, kind: 'legacy' });
+  const B = await render(sc, { createAudio: createNew, kind: 'new' });
+  const ma = metrics(A.buffer, { samples: A.samples, debug: A.debug });
+  const mb = metrics(B.buffer, { samples: B.samples, debug: B.debug });
+  // Match loudness: the louder one is turned down.
+  const d = mb.lufs - ma.lufs;
+  const ga = d < 0 ? Math.pow(10, d / 20) : 1, gb = d > 0 ? Math.pow(10, -d / 20) : 1;
+  return { sc, A, B, ma, mb, ga, gb };
+}
+
+function table(rows) {
+  const head = '<tr><th>scenario</th><th>engine</th><th>LUFS</th><th>peak</th><th>crest dB</th><th>&gt;knee %</th>' + BANDS.map(([a, b]) => `<th>${a}–${b > 9000 ? '' : b} Hz %</th>`).join('') + '<th>voices</th><th>errors</th><th>A/B gain</th></tr>';
+  const line = (id, name, m, g) => `<tr><td>${id}</td><td>${name}</td><td>${m.lufs}</td><td>${m.peak}</td><td>${m.crestDb}</td><td>${m.hotPct}</td>${m.bands.map((x) => `<td>${x}</td>`).join('')}<td>${m.maxVoices ?? ''}</td><td>${m.errors ?? ''}</td><td>${(20 * Math.log10(g)).toFixed(1)} dB</td></tr>`;
+  return '<table>' + head + rows.map((r) => line(r.sc.id, 'before', r.ma, r.ga) + line(r.sc.id, 'after', r.mb, r.gb)).join('') + '</table>';
+}
+
+function play(buf, gain, at = 0) {
+  if (!ctx) ctx = new AudioContext();
+  if (cur) cur.stop();
+  const s = ctx.createBufferSource();
+  const g = ctx.createGain();
+  g.gain.value = gain;
+  s.buffer = buf;
+  s.connect(g).connect(ctx.destination);
+  s.start(0, at);
+  t0 = ctx.currentTime;
+  off0 = at;
+  cur = s;
+}
+const pos = () => (ctx && cur ? off0 + ctx.currentTime - t0 : 0);
+
+$('go').onclick = async () => {
+  const sc = list.find((s) => s.id === $('sc').value);
+  $('out').innerHTML = '<pre>rendering…</pre>';
+  pair = await both(sc);
+  window.__compare.results[sc.id] = { ma: pair.ma, mb: pair.mb };
+  $('out').innerHTML = table([pair]);
+  for (const id of ['playA', 'playB', 'toggle']) $(id).disabled = false;
+  $('dl').innerHTML = '';
+  for (const [name, buf, g] of [['before', pair.A.buffer, pair.ga], ['after', pair.B.buffer, pair.gb]]) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(wav(buf, g));
+    a.download = `snake-shift-${sc.id}-${name}.wav`;
+    a.textContent = `download ${name} (matched)`;
+    $('dl').append(a, ' ');
+  }
+};
+$('all').onclick = async () => {
+  const rows = [];
+  for (const sc of list) {
+    $('out').innerHTML = `<pre>rendering ${sc.id}…</pre>`;
+    const r = await both(sc);
+    window.__compare.results[sc.id] = { ma: r.ma, mb: r.mb };
+    rows.push(r);
+  }
+  $('out').innerHTML = table(rows);
+};
+$('playA').onclick = () => { which = 'A'; play(pair.A.buffer, pair.ga); $('now').textContent = 'before'; };
+$('playB').onclick = () => { which = 'B'; play(pair.B.buffer, pair.gb); $('now').textContent = 'after'; };
+$('toggle').onclick = () => {
+  const at = Math.min(pos(), pair.sc.dur - 0.05);
+  which = which === 'A' ? 'B' : 'A';
+  play(which === 'A' ? pair.A.buffer : pair.B.buffer, which === 'A' ? pair.ga : pair.gb, at);
+  $('now').textContent = which === 'A' ? 'before' : 'after';
+};
+$('stop').onclick = () => { if (cur) cur.stop(); cur = null; $('now').textContent = ''; };
+</script>
+</body>
+</html>

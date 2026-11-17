@@ -460,6 +460,7 @@ export function createSim({ universes = UNIVERSES, speed = SPEED, seed = 1, star
       space: Object.freeze(spaceSnap),
       body: space.kind === 'box' ? null : Object.freeze(body.filter((c) => c !== OFF)),
       foodAt: space.kind === 'box' || !food ? null : food,
+      turns: Object.freeze(queue.slice()), // read-only view of the turn queue (audio pressure)
     };
   }
 
@@ -488,6 +489,8 @@ export function createSim({ universes = UNIVERSES, speed = SPEED, seed = 1, star
       space: cache.space,
       body: cache.body,
       foodAt: cache.foodAt,
+      // Queued turns, oldest first (0 to 2). turns[0] is the next move's direction when present.
+      turns: cache.turns,
       seed: runSeed,
     });
   }

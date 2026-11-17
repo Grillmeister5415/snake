@@ -1,279 +1,8 @@
-// Music intensity progression (LEVELS_PLAN 7): the pure scheduling decisions, and
-// what the engine actually schedules against a minimal mock AudioContext.
-import { test } from 'node:test';
+// The audio engine against a minimal mock AudioContext (SOUND_PLAN 5): what it schedules, what it
+// cancels, and that every method stays safe. The pure decisions are in tests/arrange.test.js.
+import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
-import {
-  createAudio, TIMELINE_IDS, NEW_IDS, LAYER_ORDER, ABYSS_CAP, LIFE_FIGURE,
-  universeId, stageOf, stageBpm, musicGain, musicPlan, hungerAt, riserPlan, dropPlan,
-  impactPlan, pumpDepth, filterScale, lookPlan, lifeFigure, stepHits, biteMidi,
-} from '../src/audio.js';
-
-const near = (a, b, eps = 1e-9) => assert.ok(Math.abs(a - b) <= eps, `${a} ≈ ${b}`);
-const never = () => 0.99; // rnd that never fires a random hit
-
-// ---- pure: stage, tempo, layers ------------------------------------------------
-
-test('stage = min(10, floor(score / 5)), robust to junk', () => {
-  const cases = [[0, 0], [4, 0], [5, 1], [9, 1], [10, 2], [24, 4], [25, 5], [49, 9], [50, 10], [51, 10], [999, 10], [-3, 0], [NaN, 0], [null, 0], ['12', 2], [7.9, 1]];
-  for (const [score, st] of cases) assert.equal(stageOf(score), st, `score ${score}`);
-});
-
-test('tempo table of 7.2: 112 … 152, +4 per stage, clamped', () => {
-  assert.deepEqual(Array.from({ length: 11 }, (_, s) => stageBpm(s)), [112, 116, 120, 124, 128, 132, 136, 140, 144, 148, 152]);
-  assert.equal(stageBpm(-1), 112);
-  assert.equal(stageBpm(14), 152);
-  assert.equal(stageBpm('x'), 112);
-});
-
-test('layers are cumulative: stage n plays the first n + 2 of the order', () => {
-  assert.deepEqual(LAYER_ORDER, ['kick', 'sub', 'hat', 'bass', 'snare', 'hats16', 'lead', 'perc2', 'fills', 'pump', 'rolls', 'wild']);
-  const added = ['hat', 'bass', 'snare', 'hats16', 'lead', 'perc2', 'fills', 'pump', 'rolls', 'wild'];
-  for (let s = 0; s <= 10; s++) {
-    const p = musicPlan(s, 'arcade');
-    assert.equal(p.layers.length, s + 2, `stage ${s}`);
-    assert.deepEqual(p.layers, LAYER_ORDER.slice(0, s + 2));
-    if (s > 0) assert.equal(p.layers.at(-1), added[s - 1], `stage ${s} adds ${added[s - 1]}`);
-    assert.equal(p.halfTime, false);
-  }
-  assert.deepEqual(musicPlan(0, 'acid').layers, ['kick', 'sub']);
-  assert.deepEqual(musicPlan(10, 'disco').layers, LAYER_ORDER);
-});
-
-test('calm universes: lcd is clicks at every stage, abyss half-time and capped at stage 4', () => {
-  for (let s = 0; s <= 10; s++) {
-    const l = musicPlan(s, 'lcd');
-    assert.deepEqual(l.layers, ['clicks']);
-    assert.equal(l.calm, true);
-    const a = musicPlan(s, 'abyss');
-    assert.deepEqual(a.layers, musicPlan(Math.min(s, ABYSS_CAP), 'arcade').layers);
-    assert.ok(a.layers.length <= 6);
-    assert.equal(a.halfTime, true);
-    assert.equal(a.soft, true);
-  }
-  assert.ok(!musicPlan(10, 'abyss').layers.includes('lead'));
-});
-
-test('reduced prefs drop rolls, stabs and the wild layer only', () => {
-  const p = musicPlan(10, 'kombat', { reduced: true });
-  assert.ok(!p.layers.includes('rolls') && !p.layers.includes('wild'));
-  assert.ok(p.layers.includes('pump') && p.layers.includes('fills'));
-  assert.deepEqual(musicPlan(7, 'kombat', { reduced: true }).layers, musicPlan(7, 'kombat').layers);
-});
-
-test('universe ids: sixteen known, suffixes stripped, unknown falls back to arcade', () => {
-  assert.equal(TIMELINE_IDS.length, 16);
-  for (const id of NEW_IDS) assert.ok(TIMELINE_IDS.includes(id), id);
-  assert.equal(universeId('court-pov'), 'court');
-  assert.equal(universeId('lane-3d'), 'lane');
-  assert.equal(universeId('castle'), 'castle');
-  assert.equal(universeId('nope'), 'arcade');
-  assert.equal(universeId(undefined), 'arcade');
-  assert.equal(musicPlan(3, 'nope').id, 'arcade');
-});
-
-test('bite note walks each new universe scale upward from the score', () => {
-  for (const id of NEW_IDS) {
-    const a = biteMidi(id, 1);
-    const b = biteMidi(id, 2);
-    const c = biteMidi(id, 3);
-    assert.ok(a < b && b < c, id);
-  }
-});
-
-// ---- pure: hunger, drop, impact -----------------------------------------------
-
-test('hunger: 0 for the first second, linear to 1 at six seconds, then holds', () => {
-  assert.equal(hungerAt(0), 0);
-  assert.equal(hungerAt(1), 0);
-  near(hungerAt(3.5), 0.5);
-  assert.equal(hungerAt(6), 1);
-  assert.equal(hungerAt(60), 1);
-  assert.equal(hungerAt(NaN), 0);
-  assert.equal(hungerAt(-5), 0);
-  let prev = 0;
-  for (let t = 0; t <= 8; t += 0.1) {
-    const h = hungerAt(t);
-    assert.ok(h >= prev);
-    prev = h;
-  }
-});
-
-test('riser: swells, rises and closes the low-pass with hunger; calm caps it', () => {
-  const r0 = riserPlan(0, 'arcade');
-  const r1 = riserPlan(1, 'arcade');
-  assert.equal(r0.gain, 0);
-  assert.ok(r1.gain > 0.1);
-  assert.ok(r1.freq > r0.freq * 10);
-  assert.ok(r1.lp < r0.lp && r1.lp >= 3000, 'closes a little, not to mud');
-  assert.ok(r1.hatDecay < r0.hatDecay, 'hats tighten');
-  let prev = riserPlan(0, 'acid');
-  for (let h = 0.1; h <= 1; h += 0.1) {
-    const r = riserPlan(h, 'acid');
-    assert.ok(r.gain >= prev.gain && r.lp <= prev.lp);
-    prev = r;
-  }
-  assert.deepEqual(riserPlan(1, 'lcd'), riserPlan(0, 'lcd'), 'lcd: no riser at all');
-  assert.ok(riserPlan(1, 'abyss').gain < r1.gain / 2 + 1e-9);
-  assert.ok(riserPlan(1, 'abyss').lp > r1.lp);
-});
-
-test('drop gap: one sixteenth to stage 7, shrinking to a stutter from stage 8', () => {
-  for (let s = 0; s <= 7; s++) {
-    const d = dropPlan(s);
-    assert.equal(d.gap, 1);
-    assert.equal(d.stutter, false);
-    assert.equal(d.chops, 0);
-    assert.ok(d.floor < 0.05, 'a real gap');
-    assert.deepEqual(dropPlan(s, 0.5), d, 'fast bites do not change it below stage 8');
-  }
-  let prev = 1;
-  for (let s = 8; s <= 10; s++) {
-    const d = dropPlan(s);
-    assert.ok(d.gap < prev, `stage ${s} shorter`);
-    assert.equal(d.stutter, true);
-    assert.ok(d.chops > 0 && d.floor >= 0.2, 'chopped, never silent');
-    const fast = dropPlan(s, 2);
-    assert.ok(fast.gap < d.gap && fast.gap > 0, 'faster than a bar: tighter still');
-    assert.equal(dropPlan(s, 4).gap, d.gap);
-    prev = d.gap;
-  }
-});
-
-test('impact: heavier on a swing and with the stage; calm universes never crash', () => {
-  const a = impactPlan('acid', 3);
-  const sw = impactPlan('acid', 3, { swing: true });
-  assert.ok(sw.heavy && sw.sub > a.sub && sw.crash > a.crash);
-  assert.ok(impactPlan('acid', 9).sub > a.sub);
-  assert.equal(impactPlan('acid', 3, { swing: true, reduced: true }).heavy, false);
-  assert.deepEqual(impactPlan('lcd', 10, { swing: true }), { sub: 0, crash: 0, heavy: false, soft: true });
-  const ab = impactPlan('abyss', 10, { swing: true });
-  assert.equal(ab.crash, 0);
-  assert.equal(ab.heavy, false);
-  assert.ok(ab.soft);
-});
-
-test('loudness rises 6 dB from stage 0 to 10; pump and filters open up from stage 8', () => {
-  near(20 * Math.log10(musicGain(10) / musicGain(0)), 6, 1e-9);
-  for (let s = 1; s <= 10; s++) assert.ok(musicGain(s) > musicGain(s - 1));
-  assert.ok(pumpDepth(musicPlan(8, 'disco')) > 2 * pumpDepth(musicPlan(7, 'disco')));
-  assert.equal(pumpDepth(musicPlan(5, 'lcd')), 0);
-  assert.equal(filterScale(musicPlan(7, 'disco')), 1);
-  assert.ok(filterScale(musicPlan(8, 'disco')) > 1);
-});
-
-test('look: whoosh and wider delay in 3D, plus a drone in first person', () => {
-  assert.deepEqual(lookPlan('2d'), { look: '2d', send: 0, drone: 0, whoosh: false });
-  assert.ok(lookPlan('3d').whoosh && lookPlan('3d').send > 0 && lookPlan('3d').drone === 0);
-  assert.ok(lookPlan('pov').send > lookPlan('3d').send && lookPlan('pov').drone > 0);
-  assert.equal(lookPlan('weird').look, '2d');
-});
-
-test('life-gained figure is its own: short, strictly rising, not the familiar jingle', () => {
-  const f = lifeFigure();
-  assert.equal(f.length, LIFE_FIGURE.length);
-  for (let i = 1; i < f.length; i++) {
-    assert.ok(f[i].semi > f[i - 1].semi, 'rising');
-    assert.ok(f[i].at > f[i - 1].at);
-  }
-  const last = f.at(-1);
-  assert.ok(last.at + last.dur < 0.8);
-  const steps = f.slice(1).map((n, i) => n.semi - f[i].semi);
-  assert.notDeepEqual(steps.slice(0, 5), [3, 9, -4, 2, 5]);
-});
-
-// ---- pure: what each step plays -------------------------------------------------
-
-const ARP_PAT = Array(16).fill(0); // a bass note on every step
-function barCount(stage, id, name, bar = 0, o = {}) {
-  const p = musicPlan(stage, id);
-  let n = 0;
-  for (let s = bar * 16; s < bar * 16 + 16; s++) n += stepHits(s, p, { bassPat: ARP_PAT, rnd: never, ...o }).filter((h) => h === name).length;
-  return n;
-}
-
-test('per-bar hits follow the layers of each stage', () => {
-  assert.equal(barCount(0, 'arcade', 'kick'), 4);
-  assert.equal(barCount(0, 'arcade', 'sub'), 4);
-  assert.equal(barCount(0, 'arcade', 'hat'), 0);
-  assert.equal(barCount(1, 'arcade', 'hat'), 4);
-  assert.equal(barCount(1, 'arcade', 'bass'), 0);
-  assert.equal(barCount(2, 'arcade', 'bass'), 16);
-  assert.equal(barCount(3, 'arcade', 'snare'), 2);
-  assert.equal(barCount(4, 'arcade', 'hat16'), 8);
-  assert.equal(barCount(5, 'arcade', 'lead'), 16);
-  assert.equal(barCount(6, 'arcade', 'perc'), 4);
-  assert.equal(barCount(7, 'arcade', 'fill', 0), 0);
-  assert.equal(barCount(7, 'arcade', 'fill', 3), 4, 'fills every fourth bar');
-  assert.equal(barCount(7, 'arcade', 'fill', 7), 4);
-  assert.equal(barCount(9, 'arcade', 'roll', 0), 0);
-  assert.equal(barCount(9, 'arcade', 'roll', 1), 3);
-  assert.equal(barCount(10, 'arcade', 'crash', 0), 1);
-  assert.equal(barCount(10, 'arcade', 'crash', 1), 0);
-  // Total hits per bar never fall as the stage rises.
-  let prev = 0;
-  for (let s = 0; s <= 10; s++) {
-    const p = musicPlan(s, 'arcade');
-    let n = 0;
-    for (let i = 0; i < 64; i++) n += stepHits(i, p, { bassPat: ARP_PAT, rnd: never }).length;
-    assert.ok(n >= prev, `stage ${s}`);
-    prev = n;
-  }
-});
-
-test('random stabs only from the rolls layer, wild stabs only at stage 10', () => {
-  const always = () => 0;
-  const count = (s, name) => {
-    let n = 0;
-    for (let i = 0; i < 64; i++) n += stepHits(i, musicPlan(s, 'acid'), { bassPat: ARP_PAT, rnd: always }).filter((h) => h === name).length;
-    return n;
-  };
-  assert.equal(count(8, 'stab'), 0);
-  assert.ok(count(9, 'stab') > 0);
-  assert.equal(count(9, 'wildstab'), 0);
-  assert.ok(count(10, 'wildstab') > 0);
-  assert.equal(count(10, 'stab') > 0, true);
-});
-
-test('lcd steps are clicks on the beat and nothing else', () => {
-  for (const st of [0, 5, 10]) {
-    const p = musicPlan(st, 'lcd');
-    const all = [];
-    for (let i = 0; i < 32; i++) all.push(...stepHits(i, p, { bassPat: ARP_PAT, rnd: () => 0 }));
-    assert.deepEqual([...new Set(all)], ['click']);
-    assert.equal(all.length, 8);
-  }
-});
-
-test('abyss plays half-time: kicks every two beats, nothing on odd steps', () => {
-  const p = musicPlan(10, 'abyss');
-  let kicks = 0;
-  for (let i = 0; i < 64; i++) {
-    const h = stepHits(i, p, { bassPat: ARP_PAT, rnd: () => 0 });
-    if (i % 2) assert.deepEqual(h, []);
-    kicks += h.filter((x) => x === 'kick').length;
-  }
-  assert.equal(kicks, 8, '8 kicks in 4 bars = one every two beats');
-});
-
-test('castle bass runs a 12-step cycle (three-four over four-four)', () => {
-  const waltz = [0, null, null, null, 7, null, null, null, 12, null, 7, null];
-  const p = musicPlan(2, 'castle');
-  const at = [];
-  for (let i = 0; i < 48; i++) if (stepHits(i, p, { bassPat: waltz, rnd: never }).includes('bass')) at.push(i);
-  assert.deepEqual(at.slice(0, 8), [0, 4, 8, 10, 12, 16, 20, 22]);
-  assert.equal(at.length, 16);
-});
-
-test('heartbeat on the last life: every half bar, also in lcd and abyss', () => {
-  for (const id of ['arcade', 'lcd', 'abyss']) {
-    let n = 0;
-    for (let i = 0; i < 32; i++) n += stepHits(i, musicPlan(3, id), { heart: true, rnd: never }).filter((h) => h === 'heart').length;
-    assert.equal(n, 4, id);
-  }
-  assert.ok(!stepHits(0, musicPlan(3, 'arcade'), { rnd: never }).includes('heart'));
-  assert.deepEqual(stepHits(-1, musicPlan(3, 'arcade')), []);
-  assert.deepEqual(stepHits(0, null), []);
-});
+import { createAudio, TIMELINE_IDS, NEW_IDS, LIFE_FIGURE, universeId, lookPlan, lifeFigure, tempoOf, paceOf } from '../src/audio.js';
 
 // ---- engine against a mock AudioContext ----------------------------------------
 
@@ -336,280 +65,425 @@ function mockContext() {
   return ctx;
 }
 
-// Seeded Math.random for repeatable counts.
-function withSeed(fn, seed = 7) {
-  const orig = Math.random;
-  let a = seed >>> 0;
-  Math.random = () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-  try {
-    return fn();
-  } finally {
-    Math.random = orig;
-  }
-}
-
-async function engine(prefs = {}) {
+// Every engine is stopped at the end, so a failed assertion never leaves its timer running.
+const engines = [];
+after(() => engines.forEach((a) => a.stop()));
+async function engine(prefs = {}, seed = 5) {
   const ctx = mockContext();
-  const a = createAudio(() => prefs, { context: ctx });
+  const trace = [];
+  const a = createAudio(() => prefs, { context: ctx, seed, trace });
+  engines.push(a);
   assert.equal(await a.unlock(), true);
-  return { a, ctx };
+  return { a, ctx, trace };
 }
-
-// Voices created over one bar of steps at time t0.
-function barVoices(a, bar = 0, t0 = 1) {
-  const v0 = a.debug().voices;
-  const P = a.beat.period / 4;
-  for (let s = 0; s < 16; s++) a._step(bar * 16 + s, t0 + s * P);
-  return a.debug().voices - v0;
-}
-
-test('engine: tempo and layer count follow setScore (and eat, for the current shell)', async () => {
-  const { a } = await engine();
-  assert.equal(a.beat.bpm, 112);
-  for (let score = 0; score <= 60; score += 5) {
-    a.setScore(score);
-    const st = Math.min(10, score / 5);
-    assert.equal(a.debug().stage, st);
-    assert.equal(a.beat.bpm, stageBpm(st));
-    a.setTimeline('disco');
-    assert.equal(a.debug().layerCount, st + 2);
-    a.setTimeline('lcd');
-    assert.equal(a.debug().layerCount, 1);
-    a.setTimeline('abyss');
-    assert.equal(a.debug().layerCount, Math.min(st, 4) + 2);
+// Advance the mock clock, running the scheduler like the 25 ms timer would.
+function run(a, ctx, to, dt = 0.025) {
+  for (let t = ctx.currentTime; t < to; t += dt) {
+    ctx.currentTime = t;
+    a._tick();
   }
-  a.setScore(0);
-  a.eat(25); // legacy order: setChaos, setTimeline, cut, eat(score)
-  assert.equal(a.debug().stage, 5);
-  assert.equal(a.beat.bpm, 132);
+  ctx.currentTime = to;
+  a._tick();
+}
+const GAME = (score) => ({ stepMs: Math.max(95, 150 - 1.5 * score), startMs: 150, capMs: 95, score, length: 3 + score });
+const hitsOf = (trace, t0, t1 = Infinity) => trace.filter((e) => e.hits && e.t >= t0 && e.t < t1);
+const has = (trace, name, t0 = 0, t1 = Infinity) => hitsOf(trace, t0, t1).filter((e) => e.hits.split(' ').includes(name)).length;
+
+test('the pure API stays reachable through audio.js', () => {
+  assert.equal(TIMELINE_IDS.length, 16);
+  for (const id of NEW_IDS) assert.ok(TIMELINE_IDS.includes(id), id);
+  assert.equal(universeId('court-pov'), 'court');
+  assert.equal(universeId('nope'), 'arcade');
+  assert.deepEqual(lookPlan('2d'), { look: '2d', send: 0, drone: 0, whoosh: false });
+  assert.ok(lookPlan('pov').send > lookPlan('3d').send && lookPlan('pov').drone > 0);
+});
+
+test('life-gained figure is its own: short, strictly rising, not the familiar jingle', () => {
+  const f = lifeFigure();
+  assert.equal(f.length, LIFE_FIGURE.length);
+  for (let i = 1; i < f.length; i++) {
+    assert.ok(f[i].semi > f[i - 1].semi);
+    assert.ok(f[i].at > f[i - 1].at);
+  }
+  const last = f.at(-1);
+  assert.ok(last.at + last.dur < 0.8);
+  assert.notDeepEqual(f.slice(1).map((n, i) => n.semi - f[i].semi).slice(0, 5), [3, 9, -4, 2, 5]);
+});
+
+test('pace: setGameplay sets tempo and level, snaps before the run, glides during it; danger never moves the tempo', async () => {
+  const { a, ctx } = await engine();
+  a.setTimeline('arcade');
+  a.setGameplay(GAME(0));
+  assert.ok(Math.abs(a.beat.bpm - tempoOf(paceOf(GAME(0)))) < 0.01);
+  assert.equal(a.debug().level, 0);
+  a.setGameplay(GAME(37));
+  assert.ok(a.beat.bpm > 136, `snapped before the run: ${a.beat.bpm}`);
+  assert.equal(a.debug().level, 3);
+  a.start();
+  a.setGameplay(GAME(0));
+  run(a, ctx, 0.3);
+  assert.ok(a.beat.bpm > 130, `glides, no jump: ${a.beat.bpm}`);
+  run(a, ctx, 12);
+  assert.ok(a.beat.bpm < 119.5, `settles: ${a.beat.bpm}`);
+  const bpm = a.beat.bpm;
+  a.setGameplay({ pressure: 1 });
+  run(a, ctx, 14);
+  assert.equal(a.beat.bpm, bpm, 'danger leaves the tempo alone');
   assert.equal(a.debug().errors, 0);
+  a.stop();
 });
 
-test('engine: voices per bar grow with the stage; lcd stays at clicks; abyss stops at stage 4', async () => {
-  const counts = {};
-  for (const id of ['arcade', 'acid', 'lane', 'hangar', 'mushroom', 'castle', 'lcd', 'abyss']) {
-    counts[id] = [];
-    for (let s = 0; s <= 10; s++) {
-      const { a } = await engine();
-      a.setScore(s * 5);
-      a.setTimeline(id);
-      counts[id].push(withSeed(() => barVoices(a, 1) + barVoices(a, 3, 3)));
-      assert.equal(a.debug().errors, 0, `${id} stage ${s}`);
-    }
-  }
-  for (const id of ['arcade', 'acid', 'lane', 'hangar', 'mushroom', 'castle']) {
-    assert.ok(counts[id][10] > counts[id][0] * 3, `${id}: ${counts[id]}`);
-    for (let s = 1; s <= 8; s++) assert.ok(counts[id][s] >= counts[id][s - 1], `${id} stage ${s}: ${counts[id]}`);
-  }
-  assert.ok(counts.lcd.every((n) => n === counts.lcd[0]), `lcd ${counts.lcd}`);
-  assert.equal(counts.lcd[0], 8, 'two bars of four clicks');
-  for (let s = 5; s <= 10; s++) assert.equal(counts.abyss[s], counts.abyss[4], `abyss ${counts.abyss}`);
+test('danger: fast attack and slower release on the audio clock, hysteresis, clear', async () => {
+  const { a, ctx } = await engine();
+  a.setGameplay(GAME(15));
+  a.start();
+  run(a, ctx, 1);
+  a.setGameplay({ pressure: 0.7 });
+  run(a, ctx, 1.2);
+  assert.equal(a.debug().dangerState, 1, `tense within 200 ms (${a.debug().danger})`);
+  a.setGameplay({ pressure: 0 });
+  run(a, ctx, 1.4);
+  assert.equal(a.debug().dangerState, 1, 'hysteresis holds it a moment');
+  run(a, ctx, 2.6);
+  assert.ok(a.debug().danger < 0.25 && a.debug().dangerState === 0, `released within 1.4 s (${a.debug().danger})`);
+  a.setGameplay({ pressure: 0.95 });
+  run(a, ctx, 3);
+  assert.equal(a.debug().dangerState, 2);
+  a.setGameplay({ clear: true });
+  assert.equal(a.debug().danger, 0);
+  assert.equal(a.debug().dangerState, 0);
+  a.setGameplay({ pressure: 0.95 });
+  a.bite({ score: 16, from: 'disco', to: 'disco', held: true });
+  run(a, ctx, 3.3);
+  assert.equal(a.debug().dangerState, 2, 'a bite never resets danger');
+  a.stop();
+  assert.equal(a.debug().danger, 0, 'stop clears it');
+  const r = await engine({ reducedAudio: true });
+  r.a.setGameplay(GAME(15));
+  r.a.start();
+  r.a.setGameplay({ pressure: 0.95 });
+  run(r.a, r.ctx, 2);
+  assert.ok(r.a.debug().danger < 0.33, 'calmer sound: a third of the depth');
+  assert.equal(r.a.debug().dangerState, 0);
+  r.a.stop();
 });
 
-test('engine: every universe has a bite voice and a kit, shift() is a drop for each', async () => {
+test('every universe has a kit, a gesture and a bite voice', async () => {
   for (const id of TIMELINE_IDS) {
-    const { a, ctx } = await engine();
-    a.setScore(12);
+    const { a, ctx, trace } = await engine();
+    a.setGameplay(GAME(12));
     a.start();
-    a.shift({ from: 'lcd', to: id, look: '2d' });
+    run(a, ctx, 0.5);
     const v0 = a.debug().voices;
-    a.eat(12);
+    a.bite({ score: 13, from: 'acid', to: id, look: '2d', prevLook: '2d' });
     assert.ok(a.debug().voices > v0, `${id} bite voice`);
     assert.equal(a.debug().timeline, id);
-    ctx.currentTime = 0.5;
-    a._tick();
+    run(a, ctx, 5);
+    const after = hitsOf(trace, 0.6);
+    assert.ok(after.length > 0, id);
+    if (id === 'lcd') assert.ok(after.every((e) => e.hits === 'click'), 'lcd: clicks only');
+    else if (id !== 'wrong') {
+      assert.ok(after.every((e) => e.id === id), `${id}: the new kit only`);
+      assert.ok(has(trace, 'gesture', 0.6) > 0, `${id} gesture`);
+      assert.ok(has(trace, 'kick', 0.6) + has(trace, 'kickAcc', 0.6) > 0, `${id} pulse`);
+    }
     assert.equal(a.debug().errors, 0, id);
     a.stop();
   }
 });
 
-test('engine: the drop leaves a sixteenth of silence, then the impact', async () => {
-  const { a, ctx } = await engine();
-  a.setScore(15); // stage 3
-  a.setTimeline('disco');
-  const v0 = a.debug().voices;
-  a.shift({ from: 'disco', to: 'acid', look: '2d', swing: false });
-  const d = a.debug().lastDrop;
-  assert.equal(d.gapSteps, 1);
-  assert.equal(d.stutter, false);
-  assert.equal(d.id, 'acid');
-  const impactAt = ctx.started.filter((s) => s.t > 0.01);
-  assert.ok(impactAt.length >= 2, 'sub and crash after the gap');
-  near(Math.min(...impactAt.map((s) => s.t)), d.at + a.beat.period / 4, 1e-6);
-  assert.ok(a.debug().voices > v0);
-  const inGap = d.at + a.beat.period / 8;
-  const before = a.debug().voices;
-  a._step(0, inGap);
-  assert.equal(a.debug().voices, before, 'kick inside the gap is skipped');
-  a._step(0, d.at + a.beat.period / 4 + 0.01);
-  assert.ok(a.debug().voices > before, 'kit plays again right after');
-});
-
-test('engine: from stage 8 the gap is a stutter and the groove keeps playing', async () => {
-  const { a } = await engine();
-  a.setScore(40);
-  a.setTimeline('kombat');
-  a.shift({ from: 'kombat', to: 'bunker', look: '2d' });
-  const d = a.debug().lastDrop;
-  assert.equal(d.stutter, true);
-  assert.equal(d.gapSteps, 0.75);
-  const before = a.debug().voices;
-  a._step(0, d.at + 0.005);
-  assert.ok(a.debug().voices > before, 'not silent');
-  a.shift({ from: 'bunker', to: 'arcade', look: '3d' }); // immediately again: faster than a bar
-  assert.equal(a.debug().lastDrop.gapSteps, 0.375);
-  assert.equal(a.debug().look, '3d');
-});
-
-test('engine: a shift cancels the queued old-kit steps and keeps the bar position', async () => {
-  const { a, ctx } = await engine();
-  a.setScore(30);
-  a.setTimeline('disco');
+test('a held bite cancels nothing, leaves no gap and keeps the kick grid', async () => {
+  const { a, ctx, trace } = await engine();
+  a.setGameplay(GAME(30));
   a.start();
-  ctx.currentTime = 0.02;
-  for (let s = 0; s < 8; s++) a._step(s, 0.1 + s * 0.1); // as if queued ahead
-  const queued = ctx.started.filter((s) => s.t >= 0.1);
-  a.shift({ from: 'disco', to: 'castle', look: '2d' });
-  assert.ok(a.debug().cancelled >= queued.length);
-  for (const s of queued) assert.ok(s.stopAt <= s.t, 'stopped before it starts');
-  assert.equal(a.debug().timeline, 'castle');
+  a.shift({ from: 'lcd', to: 'disco', look: '3d' });
+  run(a, ctx, 2);
+  const c0 = a.debug().cancelled;
+  const g0 = a.debug().gaps;
+  const queued = ctx.started.filter((s) => s.t > 2);
+  a.bite({ score: 31, from: 'disco', to: 'disco', held: true, look: '3d', prevLook: '3d' });
+  assert.equal(a.debug().cancelled, c0);
+  assert.equal(a.debug().gaps, g0);
+  assert.equal(a.debug().lastBite.kind, 'held');
+  for (const s of queued) assert.ok(!(s.stopAt <= s.t), 'queued notes still play');
+  run(a, ctx, 6);
+  const beatSec = 60 / a.beat.bpm;
+  const kicks = hitsOf(trace, 1, 6).filter((e) => /kick/.test(e.hits)).map((e) => e.t);
+  for (let i = 1; i < kicks.length; i++) assert.ok(Math.abs(kicks[i] - kicks[i - 1] - beatSec) < 0.02, `kick grid at ${kicks[i]}`);
+  a.stop();
+});
+
+test('a change swaps the kit on the next grid step, keeps the bar position, answers with the motif', async () => {
+  const { a, ctx, trace } = await engine();
+  a.setGameplay(GAME(30));
+  a.start();
+  a.shift({ from: 'lcd', to: 'disco', look: '3d' });
+  run(a, ctx, 2);
+  const pos = a.beat.position(2) * 4;
+  const queued = ctx.started.filter((s) => s.t > 2.004);
+  assert.ok(queued.length > 0);
+  const mark = trace.length;
+  a.bite({ score: 31, from: 'disco', to: 'castle', look: '3d', prevLook: '3d' });
+  assert.equal(a.debug().lastBite.kind, 'change');
+  for (const s of queued) assert.ok(s.stopAt <= s.t, 'old-kit notes stopped before they start');
+  assert.ok(a.debug().nextStep >= Math.ceil(pos - 1e-6) && a.debug().nextStep <= Math.ceil(pos) + 1, 'the bar position carries on');
+  assert.equal(a.debug().answers, 1);
+  run(a, ctx, 4);
+  const after = trace.slice(mark).filter((e) => e.hits);
+  assert.ok(after.length && after.every((e) => e.id === 'castle'), 'scheduled after the bite: the new kit only');
+  const steps = after.map((e) => e.step);
+  assert.equal(new Set(steps).size, steps.length, 'no duplicate steps');
   assert.equal(a.debug().errors, 0);
   a.stop();
 });
 
-test('engine: life lost = tape stop, muffled wait, snap back on respawned()', async () => {
+test('major: a vacuum then the impact; the cooldown keeps majors apart; rapid bites get lighter', async () => {
   const { a, ctx } = await engine();
-  a.setScore(20);
-  a.setTimeline('hangar');
+  a.setGameplay(GAME(12));
   a.start();
-  ctx.currentTime = 0.4;
-  a._step(0, 0.3); // something sounding to bend
+  a.shift({ from: 'lcd', to: 'arcade' });
+  run(a, ctx, 3);
+  a.bite({ score: 13, from: 'arcade', to: 'disco', swing: true, look: '3d', prevLook: '2d' });
+  const b = a.debug().lastBite;
+  assert.equal(b.kind, 'major');
+  assert.equal(a.debug().gaps, 1);
+  const v = a.debug().voices;
+  a._step(9999, b.at + 0.01);
+  assert.equal(a.debug().voices, v, 'nothing plays inside the vacuum');
+  ctx.currentTime += 0.3;
+  a.bite({ score: 14, from: 'disco', to: 'kombat', swing: true });
+  assert.equal(a.debug().lastBite.kind, 'change', 'too soon for another major');
+  assert.equal(a.debug().lastBite.rapid, true);
+  const w1 = a.debug().lastBite.weight;
+  ctx.currentTime += 0.3;
+  a.bite({ score: 15, from: 'kombat', to: 'acid' });
+  assert.ok(a.debug().lastBite.weight < w1, 'lighter again');
+  const answers = a.debug().answers;
+  assert.equal(answers, 1, 'rapid bites get no answer');
+  run(a, ctx, ctx.currentTime + (60 / a.beat.bpm) * 17);
+  a.bite({ score: 17, from: 'acid', to: 'plastic', swing: true });
+  assert.equal(a.debug().lastBite.kind, 'major');
+  assert.equal(a.debug().majors, 2);
+  assert.equal(a.debug().errors, 0);
+  a.stop();
+});
+
+test('pause and resume: the beat restarts, and nothing from before blocks gestures or majors', async () => {
+  const { a, ctx, trace } = await engine();
+  a.setGameplay(GAME(20));
+  a.start();
+  a.shift({ from: 'lcd', to: 'arcade' });
+  run(a, ctx, 30);
+  a.bite({ score: 21, from: 'arcade', to: 'disco', swing: true });
+  assert.equal(a.debug().lastBite.kind, 'major');
+  run(a, ctx, 30.5);
+  a.setGameplay({ clear: true });
+  a.stop();
+  ctx.currentTime = 33;
+  a.start();
+  const mark = trace.length;
+  run(a, ctx, 37);
+  assert.ok(trace.slice(mark).some((e) => e.hits && e.hits.includes('gesture')), 'gestures play after the resume');
+  a.bite({ score: 22, from: 'disco', to: 'kombat', swing: true });
+  assert.equal(a.debug().lastBite.kind, 'major', 'no cooldown left over from the old beat');
+  assert.equal(a.debug().errors, 0);
+  a.stop();
+});
+
+test('LCD: a hard stop with no impact, then clicks at the same bar position', async () => {
+  const { a, ctx, trace } = await engine();
+  a.setGameplay(GAME(40));
+  a.start();
+  a.shift({ from: 'lcd', to: 'bunker', look: '3d' });
+  run(a, ctx, 3);
+  const n0 = ctx.started.length;
+  const mark = trace.length;
+  a.bite({ score: 41, from: 'bunker', to: 'lcd', reset: true, swing: true, look: '2d', prevLook: '3d' });
+  assert.equal(a.debug().lastBite.kind, 'lcd');
+  const fresh = ctx.started.slice(n0);
+  assert.ok(fresh.every((s) => s.kind === 'buf' || s.type === 'square'), 'only the dry LCD bite and clicks: no impact, no crash');
+  assert.equal(a.debug().gaps, 0);
+  run(a, ctx, 5);
+  const after = trace.slice(mark).filter((e) => e.hits);
+  assert.ok(after.length >= 3 && after.every((e) => e.hits === 'click'));
+  for (const e of after) assert.equal(e.step % 4, 0, 'clicks on the beat');
+  a.stop();
+});
+
+test('Abyss: a soft bloom into half-time, no crash, no vacuum', async () => {
+  const { a, ctx, trace } = await engine();
+  a.setGameplay(GAME(30));
+  a.start();
+  a.shift({ from: 'lcd', to: 'disco' });
+  run(a, ctx, 2);
+  a.bite({ score: 31, from: 'disco', to: 'abyss', swing: true, look: '3d', prevLook: '3d' });
+  assert.equal(a.debug().lastBite.kind, 'abyss');
+  assert.equal(a.debug().gaps, 0);
+  run(a, ctx, 8);
+  const after = hitsOf(trace, 2.01);
+  assert.ok(after.length > 0 && after.every((e) => e.step % 2 === 0), 'half-time grid');
+  assert.equal(has(trace, 'hat16', 2.01), 0);
+  a.stop();
+});
+
+test('life lost: tape stop, a muffled wait with pulse and anchor only, a decisive respawn', async () => {
+  const { a, ctx, trace } = await engine();
+  a.setGameplay(GAME(20));
   a.setLives(2);
+  a.start();
+  a.shift({ from: 'lcd', to: 'hangar', look: '3d' });
+  run(a, ctx, 2);
+  a.setGameplay({ pressure: 0.9 });
+  run(a, ctx, 2.5);
+  a.setGameplay({ clear: true });
+  a.setLives(1);
   a.lifeLost();
   assert.equal(a.debug().waiting, true);
-  const v = a.debug().voices;
-  a._step(4, 0.6); // inside the tape stop
-  assert.equal(a.debug().voices, v, 'nothing new during the tape stop');
-  a._dials(1.2);
-  assert.equal(a.debug().hunger, 0, 'no hunger while waiting');
-  ctx.currentTime = 1.2;
-  const v2 = a.debug().voices;
-  a._step(8, 1.3); // after the tape: plays, muffled
-  assert.ok(a.debug().voices > v2);
+  assert.equal(a.debug().danger, 0);
+  run(a, ctx, 6);
+  const wait = hitsOf(trace, 3.2, 6);
+  assert.ok(wait.length > 0);
+  for (const e of wait) for (const h of e.hits.split(' ')) assert.ok(['kick', 'bass', 'heart'].includes(h), `waiting plays ${h}`);
   a.respawned();
   assert.equal(a.debug().waiting, false);
+  run(a, ctx, 7);
+  assert.ok(has(trace, 'kickAcc', 6) >= 1, 'the first kick back is accented');
   assert.equal(a.debug().errors, 0);
   a.stop();
 });
 
-test('engine: heartbeat and detune only on the last life; heart plays through the wait', async () => {
-  const { a, ctx } = await engine();
-  a.setScore(10);
-  a.setTimeline('acid');
-  a.start();
+test('last life: a heartbeat once a bar and the nerve voice; no global detune', async () => {
+  const { a, ctx, trace } = await engine();
+  a.setGameplay(GAME(10));
   a.setLives(3);
-  for (let s = 0; s < 16; s++) a._step(s, 1 + s * 0.1);
+  a.start();
+  a.shift({ from: 'lcd', to: 'acid' });
+  run(a, ctx, 2);
   assert.equal(a.debug().hearts, 0);
   a.setLives(1);
-  for (let s = 16; s < 32; s++) a._step(s, 3 + s * 0.1);
-  assert.equal(a.debug().hearts, 2);
-  const detuned = ctx.started.filter((s) => s.t >= 4.6 && s.kind === 'osc' && s._det !== 0);
-  assert.ok(detuned.length > 0, 'music slightly detuned');
-  ctx.currentTime = 7;
-  a.lifeLost();
-  a._step(32, 7.05);
-  assert.equal(a.debug().hearts, 3, 'heart keeps beating under the tape stop');
-  a.setLives(0);
-  a._step(40, 8);
-  assert.equal(a.debug().hearts, 3);
-  a.setLives(99);
-  assert.equal(a.debug().lives, 5);
-  a.setLives('x');
-  assert.equal(a.debug().lives, 5);
+  const bar = (4 * 60) / a.beat.bpm;
+  run(a, ctx, 2 + bar * 4);
+  assert.ok(a.debug().hearts >= 3 && a.debug().hearts <= 5, `${a.debug().hearts} hearts in four bars`);
+  assert.ok(has(trace, 'nerve', 2) >= 1);
+  const sour = ctx.started.filter((s) => s.kind === 'osc' && s._det <= -10);
+  assert.equal(sour.length, 0, 'no last-life detune');
   a.stop();
+  const r = await engine({ reducedFlash: true });
+  r.a.setGameplay(GAME(10));
+  r.a.setLives(1);
+  r.a.start();
+  run(r.a, r.ctx, 6);
+  assert.ok(r.a.debug().hearts > 0, 'a soft heartbeat stays');
+  assert.equal(has(r.trace, 'nerve'), 0, 'reduced: no nerve');
+  r.a.stop();
 });
 
-test('engine: hunger builds without a bite and is released by the bite', async () => {
+test('life gained on a bite: the figure plays, the bite voice is lighter, nothing breaks', async () => {
   const { a, ctx } = await engine();
-  a.setTimeline('arcade');
+  a.setGameplay(GAME(20));
   a.start();
-  a._dials(0.5);
-  assert.equal(a.debug().hunger, 0);
-  a._dials(3.5);
-  near(a.debug().hunger, 0.5, 0.01);
-  a._dials(7);
-  assert.equal(a.debug().hunger, 1);
-  ctx.currentTime = 7;
-  a.shift({ from: 'arcade', to: 'acid', look: '2d' });
-  a._dials(7.6);
-  assert.equal(a.debug().hunger, 0);
-  a.setTimeline('lcd');
-  a._dials(20);
-  assert.equal(a.debug().errors, 0);
-  a.stop();
-});
-
-test('engine: lcd arrival is a silent drop, life gained plays its figure', async () => {
-  const { a } = await engine();
-  a.setScore(30);
-  a.setTimeline('disco');
+  a.shift({ from: 'lcd', to: 'mushroom', look: '3d' });
+  run(a, ctx, 2);
   const v0 = a.debug().voices;
-  a.shift({ from: 'disco', to: 'lcd', look: '2d', swing: true });
-  assert.equal(a.debug().voices, v0, 'no impact into lcd');
+  a.setLives(4);
   a.lifeGained();
   assert.equal(a.debug().voices - v0, LIFE_FIGURE.length * 2);
-  a.setLook('pov');
-  assert.equal(a.debug().look, 'pov');
+  a.bite({ score: 21, kind: 'mushroom', from: 'mushroom', to: 'mushroom', held: true, lifeGained: true });
+  assert.equal(a.debug().lastBite.kind, 'held');
   assert.equal(a.debug().errors, 0);
+  a.stop();
 });
 
-test('engine: muted schedules nothing new; every method stays safe', async () => {
+test('muted schedules nothing new; every method stays safe', async () => {
   const { a } = await engine({ muted: true });
   assert.equal(a.muted, true);
-  a.setScore(50);
+  a.setGameplay(GAME(50));
   a.start();
   const v0 = a.debug().voices;
-  a.shift({ from: 'lcd', to: 'disco', look: 'pov', swing: true });
-  a.eat(50);
+  a.bite({ score: 51, from: 'lcd', to: 'disco', look: 'pov', swing: true });
+  a.shift({ from: 'disco', to: 'acid' });
   a.lifeLost();
   a.respawned();
   a.lifeGained();
+  a.eat(50);
   a.cut({ swing: true });
   a._step(0, 1);
   assert.equal(a.debug().voices, v0);
   a.setMuted(false);
-  a.eat(51);
+  a.bite({ score: 52, from: 'acid', to: 'arcade' });
   assert.ok(a.debug().voices > v0);
   a.die();
   assert.equal(a.debug().errors, 0);
 });
 
-test('new methods are safe without Web Audio and before unlock', async () => {
+test('an interrupted context schedules nothing, and start() asks it to resume', async () => {
+  const { a, ctx } = await engine();
+  let resumed = 0;
+  ctx.resume = () => { resumed++; ctx.state = 'running'; return Promise.resolve(); };
+  a.setGameplay(GAME(10));
+  a.start();
+  run(a, ctx, 1);
+  ctx.state = 'interrupted';
+  const v0 = a.debug().voices;
+  run(a, ctx, 2);
+  a.bite({ score: 11, from: 'arcade', to: 'disco' });
+  a.setGameplay({ pressure: 0.5 });
+  assert.equal(a.debug().voices, v0, 'nothing while interrupted');
+  a.stop();
+  a.start();
+  assert.equal(resumed, 1);
+  assert.equal(ctx.state, 'running');
+  run(a, ctx, 3);
+  assert.ok(a.debug().voices > v0);
+  assert.equal(a.debug().errors, 0);
+  a.stop();
+});
+
+test('the voice budget holds in a dense run', async () => {
+  const { a, ctx } = await engine();
+  a.setGameplay(GAME(60));
+  a.setLives(1);
+  a.start();
+  a.setGameplay({ pressure: 0.9 });
+  const worlds = ['bunker', 'hangar', 'castle', 'plastic', 'lane', 'abyss', 'disco', 'wrong'];
+  for (let i = 0; i < 40; i++) {
+    a.bite({ score: 61 + i, from: worlds[i % 8], to: worlds[(i + 1) % 8], swing: i % 3 === 0, look: i % 2 ? 'pov' : '3d', prevLook: '2d' });
+    run(a, ctx, ctx.currentTime + 0.35);
+  }
+  assert.ok(a.debug().maxActive <= 96 + 8, `${a.debug().maxActive}`);
+  assert.equal(a.debug().errors, 0);
+  a.stop();
+});
+
+test('new and old methods are safe without Web Audio, before unlock and with junk', async () => {
   const a = createAudio(() => ({ reducedFlash: true }));
-  for (const fn of [() => a.setScore(33), () => a.setScore('junk'), () => a.shift(), () => a.shift({ from: 'x', to: 'castle', look: 'pov', swing: true }), () => a.shift(null), () => a.setLives(1), () => a.setLives(), () => a.lifeLost(), () => a.respawned(), () => a.lifeGained(), () => a.setLook('3d'), () => a.setLook(42)]) {
+  engines.push(a);
+  const junk = [undefined, null, 42, 'x', [], { stepMs: 'fast', pressure: 'high', clear: 'yes' }, { score: NaN, from: {}, to: 7, look: null }];
+  for (const j of junk) {
+    assert.doesNotThrow(() => a.setGameplay(j));
+    assert.doesNotThrow(() => a.bite(j));
+    assert.doesNotThrow(() => a.shift(j));
+  }
+  for (const fn of [() => a.setScore(33), () => a.setScore('junk'), () => a.setLives(1), () => a.setLives(), () => a.lifeLost(), () => a.respawned(), () => a.lifeGained(), () => a.setLook('3d'), () => a.setLook(42), () => a.setTimeline('castle'), () => a.eat(3), () => a.cut(), () => a.setChaos(9)]) {
     assert.doesNotThrow(fn);
   }
-  assert.equal(a.debug().stage, 6);
-  assert.equal(a.beat.bpm, 136);
   assert.equal(a.debug().timeline, 'castle');
+  assert.equal(a.debug().errors, 0);
   assert.equal(await a.unlock(), false);
+  a.setGameplay(GAME(37));
   a.start();
   assert.equal(a.beat.running, true);
-  a.shift({ from: 'castle', to: 'abyss', look: '2d' });
+  assert.ok(a.beat.bpm > 136, 'tempo follows pace without audio too');
+  a.bite({ score: 38, from: 'castle', to: 'abyss', look: '2d' });
   a.die();
   assert.equal(a.beat.running, false);
   const b = createAudio(() => {
     throw new Error('prefs broken');
   });
-  b.setScore(9);
-  b.shift({ to: 'lane' });
+  b.setGameplay(GAME(9));
+  b.bite({ to: 'lane' });
   b.lifeLost();
   b.respawned();
   b.stop();
+  assert.equal(b.debug().errors, 0);
 });

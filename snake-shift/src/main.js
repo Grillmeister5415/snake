@@ -10,6 +10,7 @@ import { createPrefs } from './prefs.js';
 import { createInput, steerFor } from './input.js';
 import { createUI } from './ui.js';
 import { createAutopilot, chooseDir } from './autopilot.js';
+import { createPressure } from './pressure.js';
 import { randomSeed, hashSeed } from './rng.js';
 import { createFlatRenderer } from './render/flat.js';
 import { loadTimelines, loadRoomModules, loadEngine, loadSound, loadPersp } from './render/registry.js';
@@ -109,6 +110,11 @@ let frameNow = performance.now();
 let overTimer = 0;
 let respawnAt = -Infinity;
 let pendingBite = null; // an `ate` whose shift (if any) has not come yet
+// Musical pressure (SOUND_PLAN 2.4): evaluated after each advance, at most once per tick or turn change.
+const pressure = createPressure();
+let pressureTick = -1;
+let pressureTurns = null;
+let spaceKind = 'box';
 const cutLog = [];
 const eventLog = [];
 
@@ -127,20 +133,36 @@ sim.on('reset', () => {
   const snap = sim.snapshot();
   director.reset(frameNow, snap);
   pendingBite = null;
-  audio.setScore(snap.score);
+  pressureTick = -1;
+  pressureTurns = null;
+  spaceKind = snap.space.kind;
+  audio.setGameplay({ stepMs: snap.stepMs, startMs: sim.speed.startMs, capMs: sim.speed.capMs, score: snap.score, length: snap.length, clear: true });
+  // A new run starts in its own universe (LCD); a reset fires no sim shift, so tell the engine here.
+  audio.shift({ to: snap.universe.id, look: director.get().look || '2d' });
   audio.setLives(snap.lives);
   ui.setScore(snap.score, false);
   ui.setLives(snap.lives, snap.maxLives, null);
 });
 
-/** Bite audio and HUD, once the universe and look of this bite are known. */
-function finishBite(e, cut) {
+/**
+ * Bite audio and HUD, once the universe and look of this bite are known.
+ * Audio order (notes/audio.md): setGameplay → [setLives, lifeGained] → bite.
+ */
+function finishBite(e, cut, clear = false) {
   const d = director.get();
   const look = cut ? cut.look : (d.look || '2d');
+  const prevLook = cut && cut.prevLook ? cut.prevLook : look;
   const to = cut ? cut.to : d.universe;
   const from = e.from || to;
-  audio.shift({ from, to, look, swing: !!(cut && cut.swing) });
-  audio.eat(e.score);
+  audio.setGameplay({ stepMs: e.stepMs, score: e.score, length: e.length, clear });
+  if (e.lifeGained) {
+    audio.setLives(e.lives);
+    audio.lifeGained();
+  }
+  audio.bite({
+    score: e.score, kind: e.kind, from, to, look, prevLook, held: !!e.held,
+    reset: !!(cut && cut.reset), swing: !!(cut && cut.swing), lifeGained: !!e.lifeGained,
+  });
   ui.setScore(e.score, true);
 }
 
@@ -158,13 +180,11 @@ sim.on('ate', (e) => {
   logEvent('ate', { kind: e.kind, score: e.score, held: e.held, lifeGained: e.lifeGained });
   const cut = director.onAte(e, snap, frameNow);
   logCut(cut, e.score, 'flip');
-  audio.setScore(e.score);
-  if (e.lifeGained) {
-    audio.setLives(snap.lives);
-    audio.lifeGained();
-  }
   if (e.lifeGained || e.kind === 'mushroom') ui.setLives(snap.lives, snap.maxLives, e.lifeGained ? 'gain' : null);
-  pendingBite = { score: e.score, from: snap.universe.id, cut };
+  pendingBite = {
+    score: e.score, from: snap.universe.id, cut, held: !!e.held, kind: e.kind, lifeGained: !!e.lifeGained,
+    lives: snap.lives, length: snap.length, stepMs: snap.stepMs,
+  };
   if (e.held) flushBite();
 });
 
@@ -173,13 +193,17 @@ sim.on('shift', (e) => {
   logEvent('shift', { from: e.from, to: e.to, index: e.index, reset: !!e.reset });
   const cut = director.onShift(e, snap, frameNow);
   logCut(cut, snap.score, e.reset ? 'reset' : 'shift');
+  // A new space kind makes the old pressure meaningless.
+  const spaceChanged = snap.space.kind !== spaceKind;
+  spaceKind = snap.space.kind;
   if (pendingBite) {
     const b = pendingBite;
     pendingBite = null;
-    finishBite({ ...b, from: e.from }, cut || { from: e.from, to: e.to, look: director.get().look, swing: false });
+    finishBite({ ...b, from: e.from }, cut || { from: e.from, to: e.to, look: director.get().look, swing: false }, spaceChanged);
   } else {
-    // Not a bite (debug lock): the kit follows the universe without a drop.
-    audio.shift({ from: e.from, to: e.to, look: cut ? cut.look : '2d', swing: false });
+    // Not a bite (debug lock): the kit follows the universe, no bite sound, no impact.
+    if (spaceChanged) audio.setGameplay({ clear: true });
+    audio.shift({ from: e.from, to: e.to, look: cut ? cut.look : '2d' });
   }
 });
 
@@ -188,6 +212,7 @@ sim.on('lifeLost', (e) => {
   const snap = sim.snapshot();
   logEvent('lifeLost', { lives: e.lives, reason: e.death && e.death.reason });
   director.onLifeLost(e, snap, frameNow);
+  audio.setGameplay({ clear: true });
   audio.setLives(e.lives);
   audio.lifeLost();
   ui.setLives(e.lives, snap.maxLives, 'loss');
@@ -201,6 +226,7 @@ sim.on('died', (e) => {
   const snap = sim.snapshot();
   logEvent('died', { score: e.score, reason: e.death && e.death.reason });
   director.onDeath(snap, frameNow);
+  audio.setGameplay({ clear: true });
   audio.setLives(0);
   audio.die();
   if (beat.running) { try { beat.stop(); } catch (err) { console.warn(err); } }
@@ -267,6 +293,7 @@ function togglePause() {
     sim.setPaused(true);
     mode = 'paused';
     ui.showPaused(true);
+    audio.setGameplay({ clear: true });
     audio.stop();
   } else if (mode === 'paused' && pausedFrom) {
     mode = pausedFrom; // still waiting for the first direction key
@@ -389,6 +416,14 @@ function frame(t) {
       sim.advance(dt);
     }
     flushBite();
+    if (mode === 'playing') {
+      const ps = sim.snapshot();
+      if (ps.tick !== pressureTick || ps.turns !== pressureTurns) {
+        pressureTick = ps.tick;
+        pressureTurns = ps.turns;
+        audio.setGameplay({ pressure: pressure.evaluate(ps).danger });
+      }
+    }
   } else if (mode === 'respawn' && opts.auto && t - respawnAt > 700) {
     respawn(null);
   }
@@ -435,6 +470,8 @@ if (opts.debug) {
     sim, director, engine, persp, timelines, roomMods, universes, prefs, audio, beat, flat, ui,
     get fx() { return lastFx; },
     get snap() { return sim.snapshot(); },
+    /** The musical pressure estimate for the current snapshot (a copy). */
+    get pressure() { return { ...createPressure().evaluate(sim.snapshot()) }; },
     get d() { return director.get(); },
     quality,
     get mode() { return mode; },

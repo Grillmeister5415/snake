@@ -1,4 +1,4 @@
-// Player preferences, saved locally: reduced flash, reduced motion, mute, best score.
+// Player preferences, saved locally: reduced flash, reduced motion, calmer sound, mute, best score.
 // Reduced motion follows the system setting until the player sets it.
 
 import { STORAGE_KEY } from './config.js';
@@ -15,6 +15,8 @@ export function createPrefs({ storage, matchMedia } = {}) {
   const state = {
     reducedFlash: saved.reducedFlash === true,
     reducedMotion: typeof saved.reducedMotion === 'boolean' ? saved.reducedMotion : systemRM,
+    // Calmer sound: fewer tension effects, the music stays (SOUND_PLAN 2.10). Off by default.
+    reducedAudio: saved.reducedAudio === true,
     muted: saved.muted === true,
     dpad: saved.dpad === true, // on-screen direction buttons, off by default
     best: Number.isFinite(saved.best) ? saved.best : 0,

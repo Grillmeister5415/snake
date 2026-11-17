@@ -397,6 +397,12 @@ h2 {
   #title > .big { min-width: 0; padding: 12px 16px; }
   #title > .keys { margin-top: 8px; }
   .switch { padding: 7px 10px; min-height: 44px; }
+  /* Three switches on the title (Calmer sound): a little tighter so PLAY stays on screen. */
+  #title > .switches { gap: 5px; margin-bottom: 6px; }
+  #title > .keys { margin-top: 4px; }
+  #title > .lives-note { margin-bottom: 6px; }
+  #title .switch { padding: 4px 10px; min-height: 38px; }
+  #title .switch small { font-size: 11px; margin-top: 1px; }
   .warning p { font-size: 12px; line-height: 1.4; }
   h2 { margin-bottom: 10px; }
   #paused .switches { grid-template-columns: 1fr 1fr; margin-bottom: 12px; }

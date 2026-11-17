@@ -241,7 +241,7 @@ test('createSim() with no universes uses the sixteen, opens in 3310 Ghost and wa
   checkSnap(s);
   for (const k of ['cols', 'rows', 'snake', 'breaks', 'length', 'dir', 'prevDir', 'heading', 'prevTail', 'grew', 'food',
     'mushroom', 'score', 'stepMs', 'tick', 'progress', 'alive', 'paused', 'waiting', 'death', 'lives', 'maxLives',
-    'universe', 'space', 'body', 'foodAt', 'seed']) assert.ok(k in s, `snapshot has ${k}`);
+    'universe', 'space', 'body', 'foodAt', 'turns', 'seed']) assert.ok(k in s, `snapshot has ${k}`);
   assert.deepEqual(plain(s.universe), { id: 'lcd', rules: 'box', mushrooms: false, index: 0, holdLeft: 0 });
   assert.deepEqual(plain(s.space), { kind: 'box' });
   assert.equal(s.waiting, 'start');
@@ -251,6 +251,27 @@ test('createSim() with no universes uses the sixteen, opens in 3310 Ghost and wa
   assert.equal(s.mushroom, null);
   sim.setPaused(false);
   assert.equal(sim.snapshot().waiting, null);
+});
+
+test('snapshot turns: a frozen copy of the queue that empties as the turns are used', () => {
+  const sim = createSim({ seed: 2 });
+  sim.setPaused(false);
+  const s0 = sim.snapshot();
+  assert.deepEqual([...s0.turns], []);
+  assert.ok(Object.isFrozen(s0.turns));
+  sim.queueTurn('up');
+  sim.queueTurn('left');
+  const s1 = sim.snapshot();
+  assert.deepEqual([...s1.turns], ['up', 'left']);
+  assert.ok(Object.isFrozen(s1.turns));
+  assert.deepEqual([...s0.turns], [], 'an older snapshot keeps its copy');
+  assert.equal(s1.heading, 'left');
+  sim.step();
+  assert.deepEqual([...sim.snapshot().turns], ['left']);
+  assert.equal(sim.snapshot().dir, 'up');
+  sim.step();
+  assert.deepEqual([...sim.snapshot().turns], []);
+  assert.equal(sim.snapshot().dir, 'left');
 });
 
 test('a caller table without some universes still runs, lcd first', () => {

@@ -30,10 +30,15 @@ a mushroom (beside the dot, gone after 80 steps) is food and adds a life.
 
 ## Music
 
-One procedural track that never stops (Web Audio, no files). Every five foods add a layer and 4 BPM
-(112 to 152); every bite is a drop into the new universe's kit on the same bar position, and a riser
-builds while you go hungry. A lost life tape-stops and muffles the mix until you move; 3310 Ghost is
-only clicks, Abyssal Cathedral plays half-time. Mute with M; nothing sounds before the first click.
+One procedural track that never stops (Web Audio, no files). The snake's speed sets the tempo (118 to
+138 BPM) and how full the arrangement is; every universe plays one shared motif in its own voice from
+its first bar. A tight spot on the board tightens the music (faster hats, thinner melody) and lets go
+when it clears; the tempo never jumps. A bite in the same universe is a small accent, a change swaps
+the kit on the same bar position, and a few brightness swings or milestones get a vacuum and an impact.
+3310 Ghost is only clicks, Abyssal Cathedral plays half-time. A lost life tape-stops and muffles the mix
+until you move; the last life adds a quiet heartbeat. *Calmer sound* keeps the music and drops the
+tension effects. Mute with M; nothing sounds before the first click. Details: `notes/audio.md`;
+test bench `dev/audio.html`, before and after `dev/audio-compare.html`.
 
 ## Universes
 
@@ -49,14 +54,15 @@ only clicks, Abyssal Cathedral plays half-time. Mute with M; nothing sounds befo
 A universe is `src/render/timelines/<id>.js` (2D) and/or `src/render/gl/rooms/<id>.js` (room); whatever
 loads is used. 3310 Ghost and Abyssal Cathedral are calm: no inversion, strobe or glitch while they show.
 
-## The two switches
+## The switches
 
 The title shows a photosensitivity warning on every load. Wild by default: strobes, inversions, violent cuts.
 
 - **Reduced flash**: no strobes or inversions; every shift still happens on time (it can change the rules) but as a 450 ms veiled fade, and when shifts come less than 3.5 s apart the veil stays partly up between them. Beat pulse capped at 15%.
 - **Reduced motion**: scenery at 15% speed, no camera glides, no first-person view. Defaults to the system setting.
+- **Calmer sound**: no vacuum transitions, a third of the music's tension response, no anticipation noise or nerve voice on the last life. The music stays. Either switch above also gives the calmer sound.
 
-Both are on the title and in settings, and are saved locally.
+All three are on the title and in settings, and are saved locally.
 
 ## Debug URL switches
 
@@ -88,11 +94,12 @@ src/director.js fx.js      universe table, which look shows and how hard a cut h
 src/input.js ui.js prefs.js keys, swipes, pad; DOM; saved settings and best score
 src/autopilot.js           BFS player for ?auto and tests
 src/audio.js beat.js       procedural sound and the beat clock
+src/arrange.js pressure.js music decisions (pace, world, motif, harmony, bites); board pressure for the music
 src/render/flat.js         2D canvas: timelines, glitch, phrase cards, first-person HUD
 src/render/registry.js     loads whatever modules exist, with stubs
 src/render/timelines/*.js  2D looks (and life() icons)
 src/render/gl/             WebGL engine and the rooms (3D looks, life() icons)
 src/render/persp.js        Canvas 2D stand-in for the rooms without WebGL
-tests/                     rules, lives, spaces, flow, director, music, beat, replay (node --test)
+tests/                     rules, lives, spaces, flow, director, music, arrange, pressure, beat, replay (node --test)
 dev/                       harness pages per stream; notes/ build notes per stream
 ```
