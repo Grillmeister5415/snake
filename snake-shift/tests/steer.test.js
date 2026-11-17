@@ -104,3 +104,84 @@ test('chooseDir knows the walls of each space', () => {
   // The body blocks: a hook to the left leaves only one way out.
   assert.equal(chooseDir(snap(box, [[5, 5], [5, 6], [4, 6], [4, 5], [4, 4], [5, 4], [6, 4]], 'up')), 'right');
 });
+
+// ---------------------------------------------------------------- taps (first person on a phone)
+
+import { createInput } from '../src/input.js';
+
+test('a short still touch is a tap; a swipe, a long press or a mouse click is not', () => {
+  const handlers = {};
+  const stage = { addEventListener: (type, fn) => { handlers[type] = fn; }, removeEventListener() {} };
+  const before = globalThis.window;
+  globalThis.window = { addEventListener() {}, removeEventListener() {} };
+  try {
+    const taps = [], dirs = [];
+    createInput({ stage, onDir: (d) => dirs.push(d), onTap: (x, y) => taps.push([x, y]), onPause() {}, onConfirm() {}, onMute() {} });
+    const ev = (type, x, y, t, pointerType = 'touch') => handlers[type]({ pointerId: 1, pointerType, clientX: x, clientY: y, timeStamp: t, preventDefault() {} });
+
+    ev('pointerdown', 50, 300, 0); ev('pointerup', 53, 302, 120);
+    assert.deepEqual(taps, [[53, 302]], 'short still touch');
+    assert.deepEqual(dirs, []);
+
+    ev('pointerdown', 50, 300, 1000); ev('pointermove', 90, 300, 1040); ev('pointerup', 90, 300, 1080);
+    assert.deepEqual(dirs, ['right'], 'a swipe steers');
+    assert.equal(taps.length, 1, 'and is not a tap');
+
+    ev('pointerdown', 50, 300, 2000); ev('pointerup', 50, 300, 2600);
+    assert.equal(taps.length, 1, 'long press');
+
+    ev('pointerdown', 50, 300, 3000); ev('pointerup', 50, 318, 3100);
+    assert.equal(taps.length, 1, 'drifted too far, though short of a swipe');
+
+    ev('pointerdown', 50, 300, 4000, 'mouse'); ev('pointerup', 50, 300, 4050, 'mouse');
+    assert.equal(taps.length, 1, 'mouse click');
+
+    ev('pointerdown', 50, 300, 5000); ev('pointercancel', 50, 300, 5050); ev('pointerup', 50, 300, 5060);
+    assert.equal(taps.length, 1, 'cancelled touch');
+  } finally {
+    globalThis.window = before;
+  }
+});
+
+test('one drag: a direction fires once however long it is, and an L-shaped drag chains', () => {
+  const handlers = {};
+  const stage = { addEventListener: (type, fn) => { handlers[type] = fn; }, removeEventListener() {} };
+  const before = globalThis.window;
+  globalThis.window = { addEventListener() {}, removeEventListener() {} };
+  try {
+    const got = [];
+    createInput({ stage, onDir: (d, source, gesture) => got.push([d, gesture]), onPause() {}, onConfirm() {}, onMute() {} });
+    let t = 0;
+    const ev = (type, x, y) => handlers[type]({ pointerId: 1, pointerType: 'touch', clientX: x, clientY: y, timeStamp: (t += 16), preventDefault() {} });
+
+    // A long swipe to the left, 150 px in small steps, wobbling a little: one 'left'.
+    ev('pointerdown', 300, 400);
+    for (let x = 290; x >= 150; x -= 10) ev('pointermove', x, 400 + (x % 20 ? 3 : -3));
+    ev('pointerup', 150, 400);
+    assert.deepEqual(got, [['left', 1]]);
+
+    // A second swipe is a new gesture and fires again.
+    ev('pointerdown', 300, 400);
+    ev('pointermove', 260, 400);
+    ev('pointerup', 260, 400);
+    assert.deepEqual(got, [['left', 1], ['left', 2]]);
+
+    // One drag left and then up: both turns, same gesture number.
+    got.length = 0;
+    ev('pointerdown', 300, 400);
+    for (let x = 290; x >= 220; x -= 10) ev('pointermove', x, 400);
+    for (let y = 390; y >= 340; y -= 10) ev('pointermove', 220, y);
+    ev('pointerup', 220, 340);
+    assert.deepEqual(got, [['left', 3], ['up', 3]]);
+
+    // A short hook at the end of a swipe (the thumb's arc) is not a second turn.
+    got.length = 0;
+    ev('pointerdown', 300, 400);
+    for (let x = 290; x >= 240; x -= 10) ev('pointermove', x, 400);
+    ev('pointermove', 236, 412); ev('pointermove', 232, 424);
+    ev('pointerup', 232, 424);
+    assert.deepEqual(got, [['left', 4]]);
+  } finally {
+    globalThis.window = before;
+  }
+});

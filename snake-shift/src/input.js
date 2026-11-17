@@ -8,6 +8,9 @@ const KEYS = {
   ArrowRight: 'right', KeyD: 'right',
 };
 const SWIPE_PX = 22;
+const CHAIN_PX = 34; // a second turn inside the same drag needs a longer, deliberate leg
+const TAP_MS = 350; // a touch shorter than this that never became a swipe is a tap
+const TAP_PX = 12;
 
 const TURN_LEFT = { up: 'left', left: 'down', down: 'right', right: 'up' };
 const TURN_RIGHT = { up: 'right', right: 'down', down: 'left', left: 'up' };
@@ -27,7 +30,7 @@ export function steerFor(dir, view, heading) {
   return null;
 }
 
-export function createInput({ stage, pad = null, onDir, onPause, onConfirm, onMute }) {
+export function createInput({ stage, pad = null, onDir, onTap = null, onPause, onConfirm, onMute }) {
   function isControl(el) {
     return el && (el.tagName === 'BUTTON' || el.tagName === 'INPUT' || el.tagName === 'LABEL' || el.tagName === 'A');
   }
@@ -64,27 +67,43 @@ export function createInput({ stage, pad = null, onDir, onPause, onConfirm, onMu
   }
   window.addEventListener('keydown', keydown);
 
-  // Swipes: 22 px threshold, re-armed mid-gesture so one drag can chain turns.
+  // Swipes: 22 px threshold, re-armed mid-gesture so one drag can chain turns (an L-shaped drag).
+  // Keeping the finger moving the same way never repeats the direction: in first person a repeat
+  // would be a second turn. onDir also gets the gesture's number, so main.js can tell one drag
+  // from two swipes.
+  // A short touch that stays put is a tap (main.js uses it to turn in first person).
   let active = null;
+  let gestures = 0;
   function down(e) {
     if (e.pointerType === 'mouse') return;
-    active = { id: e.pointerId, x: e.clientX, y: e.clientY };
+    active = { id: e.pointerId, n: ++gestures, x: e.clientX, y: e.clientY, x0: e.clientX, y0: e.clientY, t0: e.timeStamp, swiped: false, last: null };
   }
   function move(e) {
     if (!active || e.pointerId !== active.id) return;
     const dx = e.clientX - active.x, dy = e.clientY - active.y;
-    if (Math.max(Math.abs(dx), Math.abs(dy)) < SWIPE_PX) return;
+    if (Math.max(Math.abs(dx), Math.abs(dy)) < (active.swiped ? CHAIN_PX : SWIPE_PX)) return;
     const dir = Math.abs(dx) > Math.abs(dy) ? (dx > 0 ? 'right' : 'left') : (dy > 0 ? 'down' : 'up');
     active.x = e.clientX;
     active.y = e.clientY;
-    onDir(dir, 'swipe');
+    active.swiped = true;
     e.preventDefault();
+    if (dir === active.last) return;
+    active.last = dir;
+    onDir(dir, 'swipe', active.n);
   }
-  function up(e) { if (active && e.pointerId === active.id) active = null; }
+  function cancel(e) { if (active && e.pointerId === active.id) active = null; }
+  function up(e) {
+    if (!active || e.pointerId !== active.id) return;
+    const a = active;
+    active = null;
+    if (!onTap || a.swiped || e.timeStamp - a.t0 > TAP_MS) return;
+    if (Math.max(Math.abs(e.clientX - a.x0), Math.abs(e.clientY - a.y0)) > TAP_PX) return;
+    onTap(e.clientX, e.clientY);
+  }
   stage.addEventListener('pointerdown', down, { passive: true });
   stage.addEventListener('pointermove', move, { passive: false });
   stage.addEventListener('pointerup', up);
-  stage.addEventListener('pointercancel', up);
+  stage.addEventListener('pointercancel', cancel);
   // Optional on-screen direction buttons: act on press, never take focus.
   if (pad) {
     pad.addEventListener('pointerdown', (e) => {
@@ -104,7 +123,7 @@ export function createInput({ stage, pad = null, onDir, onPause, onConfirm, onMu
       stage.removeEventListener('pointerdown', down);
       stage.removeEventListener('pointermove', move);
       stage.removeEventListener('pointerup', up);
-      stage.removeEventListener('pointercancel', up);
+      stage.removeEventListener('pointercancel', cancel);
     },
   };
 }

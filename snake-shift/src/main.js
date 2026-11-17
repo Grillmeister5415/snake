@@ -288,20 +288,35 @@ function toggleMute() {
   audio.setMuted(m);
 }
 
+let usedGesture; // the swipe gesture that already turned the snake in first person, or started the run
 createInput({
   stage,
   pad: $('dpad'),
-  onDir: (dir, source) => {
+  onDir: (dir, source, gesture) => {
     if (source === 'swipe' || source === 'button') touchSeen = true;
     if (opts.auto) return;
-    if (mode === 'ready') begin(dir);
-    else if (mode === 'respawn') respawn(dir);
+    if (mode === 'ready') { usedGesture = gesture; begin(dir); }
+    else if (mode === 'respawn') { usedGesture = gesture; respawn(dir); }
     else if (mode === 'playing') {
       // First person steers relative to the snake's heading; board views use grid directions.
       const snap = sim.snapshot();
-      const turn = steerFor(dir, director.get().view, snap.heading || snap.dir);
-      if (turn) sim.queueTurn(turn);
+      const view = director.get().view;
+      // First person: one swipe is one turn, however far the finger keeps moving. (Left is relative
+      // there, so a second direction from the same drag would turn the snake again.)
+      const swipe = view === 'pov' && gesture !== undefined;
+      if (swipe && gesture === usedGesture) return;
+      const turn = steerFor(dir, view, snap.heading || snap.dir);
+      if (turn && sim.queueTurn(turn) && swipe) usedGesture = gesture;
     }
+  },
+  // First person on a phone: a tap on the left or right half of the screen turns that way.
+  onTap: (x) => {
+    touchSeen = true;
+    if (opts.auto || mode !== 'playing' || director.get().view !== 'pov') return;
+    const r = stage.getBoundingClientRect();
+    const snap = sim.snapshot();
+    const turn = steerFor(x < r.left + r.width / 2 ? 'left' : 'right', 'pov', snap.heading || snap.dir);
+    if (turn) sim.queueTurn(turn);
   },
   onPause: () => {
     if (mode === 'playing' || mode === 'paused') togglePause();

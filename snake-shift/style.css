@@ -28,6 +28,7 @@ html, body {
   overscroll-behavior: none;
   user-select: none;
   -webkit-user-select: none;
+  -webkit-touch-callout: none;
 }
 
 #stage {
@@ -60,8 +61,8 @@ html, body {
 #hud {
   position: fixed;
   top: calc(8px + var(--safe-top));
-  left: 10px;
-  right: 10px;
+  left: max(10px, env(safe-area-inset-left, 0px));
+  right: max(10px, env(safe-area-inset-right, 0px));
   display: flex;
   justify-content: space-between;
   align-items: flex-start;
@@ -76,7 +77,7 @@ html, body {
 :root[data-timeline="kombat"] #hud { top: calc(54px + var(--safe-top)); }
 :root[data-timeline="kombat"] .hud-plate {
   position: fixed;
-  left: 10px;
+  left: max(10px, env(safe-area-inset-left, 0px));
   bottom: calc(6px + env(safe-area-inset-bottom, 0px));
 }
 .hud-plate {
@@ -342,6 +343,12 @@ button.big:disabled { opacity: 0.5; cursor: wait; }
   opacity: 0.7;
 }
 #loading:empty, #loading[hidden] { display: none; }
+.for-touch { display: none; }
+@media (pointer: coarse) {
+  .for-keys { display: none; }
+  .for-touch { display: inline; }
+  #paused .keys, #over .keys { display: none; }
+}
 
 h2 {
   margin: 0 0 16px;
@@ -362,11 +369,37 @@ h2 {
   .panel { padding: 20px 16px 16px; box-shadow: 5px 5px 0 var(--hot), -5px -5px 0 var(--cold); }
   .logo { text-shadow: 2px 0 0 var(--hot), -2px 0 0 var(--cold); }
   #score { font-size: 22px; }
-  #lives { width: 74px; height: 18px; }
-  .hud-plate { gap: 8px; padding: 5px 8px; }
-  .era b { font-size: 11px; max-width: 34vw; }
+  /* Two rows on a phone, so the universe name is never cut: score and lives, then name and year. */
+  .hud-plate { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: 3px 8px; padding: 5px 8px; }
+  #lives { width: 74px; height: 18px; justify-self: start; }
+  .era { grid-column: 1 / -1; flex-direction: row; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .era b { font-size: 11px; letter-spacing: 0.1em; }
+  .era i { font-size: 10px; letter-spacing: 0.12em; white-space: nowrap; flex: none; }
   .hud-buttons button { width: 38px; height: 38px; }
   .warning p { font-size: 12px; }
+  /* Pixel Kombat with touch buttons: the plate sits under the fight bar, so the hint goes below it. */
+  :root.dpad-on[data-timeline="kombat"] #hint { top: calc(114px + var(--safe-top)); }
+}
+/* Phone on its side: the title is taller than the screen, so the warning and the switches sit side by side. */
+@media (max-height: 480px) and (orientation: landscape) {
+  .panel {
+    width: min(780px, calc(100vw - 32px - env(safe-area-inset-left, 0px) - env(safe-area-inset-right, 0px)));
+    padding: 14px 18px 12px;
+  }
+  #title:not([hidden]) { display: grid; grid-template-columns: 1.2fr 1fr; column-gap: 16px; align-items: start; }
+  #title > .logo, #title > .tagline, #title > .lives-note { grid-column: 1 / -1; }
+  .logo { font-size: clamp(28px, 11vh, 44px); }
+  .tagline { margin: 6px 0 2px; font-size: 13px; }
+  .lives-note { margin: 2px 0 10px; }
+  #title > .warning { grid-column: 1; grid-row: 4 / span 4; margin: 0; padding: 14px 12px 10px; }
+  #title > .switches, #title > .big, #title > .keys { grid-column: 2; }
+  #title > .switches { margin-bottom: 10px; }
+  #title > .big { min-width: 0; padding: 12px 16px; }
+  #title > .keys { margin-top: 8px; }
+  .switch { padding: 7px 10px; min-height: 44px; }
+  .warning p { font-size: 12px; line-height: 1.4; }
+  h2 { margin-bottom: 10px; }
+  #paused .switches { grid-template-columns: 1fr 1fr; margin-bottom: 12px; }
 }
 @media (max-height: 640px) and (min-width: 521px) {
   .warning p { font-size: 12px; }

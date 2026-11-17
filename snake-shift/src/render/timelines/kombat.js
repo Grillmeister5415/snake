@@ -566,7 +566,8 @@ function popText(ctx, L, fx, snap, st, top) {
   let word = POPS[mod(fx.variant, POPS.length)];
   if (word === 'COMBO') word = 'COMBO x' + Math.max(1, num(snap && snap.score));
   const side = st.mode === 'side', size = Math.round(side ? clamp((L.bx - margin(L)) * 0.14, 18, 52) : clamp(L.w * 0.085, 18, 40));
-  const x = side ? st.xs[mod(fx.variant, 2)] : L.w / 2, y = side ? Math.max(top + size, st.feet - st.fh - size * 0.6) : top + size * 0.9;
+  // Portrait phones: the HUD buttons sit top right under the fight bar, so the pop goes left of them.
+  const x = side ? st.xs[mod(fx.variant, 2)] : L.w < 520 ? (L.w - 136) / 2 : L.w / 2, y = side ? Math.max(top + size, st.feet - st.fh - size * 0.6) : top + size * 0.9;
   ctx.save();
   ctx.translate(x, y); ctx.scale(s, s); ctx.rotate(((fx.variant % 3) - 1) * 0.06);
   ctx.globalAlpha = Math.max(0, al);

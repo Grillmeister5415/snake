@@ -1425,7 +1425,8 @@ export function createAudio(getPrefs, opts = {}) {
         }
         dialTargets = {};
         bus.droneGain.gain.setTargetAtTime(lookPlan(look).drone, now, 0.4);
-        if (!offline && ctx.state === 'suspended') ctx.resume().catch(() => {});
+        // 'interrupted' is iOS after a call or an app switch; it needs the same resume as 'suspended'.
+        if (!offline && ctx.state !== 'running' && ctx.state !== 'closed') ctx.resume().catch(() => {});
       }
       if (!timer && typeof setInterval === 'function') timer = setInterval(api._tick, TICK_MS);
       tick();

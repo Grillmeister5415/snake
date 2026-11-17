@@ -191,7 +191,11 @@ export function createFlatRenderer({ canvas, invertEl, cols, rows, onBroken = ()
     ctx.save();
     let size = Math.min(band * 0.78, 140);
     ctx.font = `900 italic ${size}px ${PHRASE_FONT}`;
-    const tw = ctx.measureText(p.text).width;
+    // Fit by the ink, not the advance width: the italic overhang, outline and colour split would
+    // otherwise run off a phone screen.
+    const m = ctx.measureText(p.text);
+    const ink = (m.actualBoundingBoxLeft || 0) + (m.actualBoundingBoxRight || 0);
+    const tw = Math.max(m.width, ink) + size * 0.2;
     const maxW = top < HUD_BAND ? Math.max(120, w - 2 * 178) : w * 0.92;
     if (tw > maxW) {
       size *= maxW / tw;
@@ -324,7 +328,7 @@ export function createFlatRenderer({ canvas, invertEl, cols, rows, onBroken = ()
       ctx.font = `700 11px ui-monospace, Menlo, monospace`;
       ctx.textBaseline = 'top';
       ctx.fillText(cap.side === 'left' ? '↶ LEFT' : 'RIGHT ↷', cap.x + k / 2, ky - 17);
-      ctx.fillText(touch ? `${typeof touch === 'string' ? touch : 'swipe'} ${ARROW[cap.d]}` : `or ${WASD[cap.d]}`, cap.x + k / 2, ky + k + 5);
+      ctx.fillText(touch ? `tap ${ARROW[cap.d]}` : `or ${WASD[cap.d]}`, cap.x + k / 2, ky + k + 5);
     }
     ctx.restore();
   }
